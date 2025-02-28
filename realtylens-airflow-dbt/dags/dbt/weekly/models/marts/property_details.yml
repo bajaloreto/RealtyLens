@@ -1,0 +1,32 @@
+version: 2
+
+models:
+  - name: property_details
+    description: "This model enriches property details with zoning information based on latitude and longitude."
+    columns:
+      - name: property_id
+        description: "Unique identifier for the property."
+      - name: property_name
+        description: "Name of the property."
+      - name: longitude
+        description: "Longitude coordinate of the property."
+      - name: latitude
+        description: "Latitude coordinate of the property."
+      - name: zoning_code
+        description: "Zoning code associated with the property."
+      - name: zoning_long_code
+        description: "Long form of the zoning code."
+      - name: zoning_id
+        description: "Unique identifier for the zoning area."
+      - name: polygon_coordinates
+        description: "Coordinates defining the zoning polygon."
+
+    tests:
+      - unique:
+          column_name: property_id
+      - not_null:
+          column_name: property_id
+      - not_null:
+          column_name: longitude
+      - not_null:
+          column_name: latitude

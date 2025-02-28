@@ -1,0 +1,28 @@
+version: 2
+
+models:
+    - name: zipcode_polygon
+      description: "Raw zipcode polygon data from the AWS zip codes polygon stage"
+      columns:
+        - name: zip_code_id
+          description: "Unique identifier for the zipcode polygon"
+          tests:
+            - not_null
+            - unique
+        - name: zip_code
+          description: "Zipcode code"
+          tests:
+            - not_null
+            - unique
+        - name: cod
+          description: "Additional code information"
+        - name: shape_area
+          description: "Area of the shape"
+        - name: shape_length
+          description: "Length of the shape"
+        - name: polygon_type
+          description: "Type of geometry"
+        - name: polygon_coordinates
+          description: "Coordinates of the polygon"
+        - name: load_date
+          description: "Date the data was loaded"

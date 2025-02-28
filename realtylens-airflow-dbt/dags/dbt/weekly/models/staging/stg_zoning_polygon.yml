@@ -1,0 +1,26 @@
+version: 2
+
+models:
+
+    - name: stg_zoning_polygon
+      description: "Raw zoning polygon data from the AWS zoning polygon stage"
+      columns:
+        - name: zoning_id
+          description: "Unique identifier for the zoning polygon"
+          tests:
+            - not_null
+            - unique
+        - name: zoning_code
+          description: "Zoning code"
+          tests:
+            - not_null
+        - name: zoning_long_code
+          description: "Long zoning code"
+        - name: zoning_group
+          description: "Zoning group classification"
+        - name: polygon_type
+          description: "Type of geometry"
+        - name: polygon_coordinates
+          description: "Geometry in JSON format"
+        - name: load_date
+          description: "Date the data was loaded"

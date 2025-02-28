@@ -1,0 +1,30 @@
+version: 2
+
+models:
+  - name: zoning_polygon
+    description: "This model enriches zoning data with zip codes based on spatial relationships."
+    columns:
+      - name: zoning_id
+        description: "Unique identifier for the zoning area."
+      - name: zoning_code
+        description: "Code representing the zoning classification."
+      - name: zoning_long_code
+        description: "Long form of the zoning code."
+      - name: zoning_group
+        description: "Group classification for zoning."
+      - name: polygon_type
+        description: "Type of polygon representing the zoning area."
+      - name: polygon_coordinates
+        description: "Geometric representation of the zoning area."
+      - name: load_date
+        description: "Date when the data was loaded."
+      - name: zip_code
+        description: "Zip code associated with the zoning area."
+        
+    tests:
+      - unique:
+          column_name: zoning_id
+      - not_null:
+          column_name: zoning_id
+      - not_null:
+          column_name: zip_code

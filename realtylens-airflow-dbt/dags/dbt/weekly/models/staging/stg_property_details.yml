@@ -1,0 +1,61 @@
+version: 2
+
+models:
+  - name: stg_property_details
+    description: "Staging model for property details, normalized from raw_property_details"
+    columns:
+      - name: property_id
+        description: "Unique identifier for the property"
+        tests:
+          - not_null
+          - unique
+      - name: formatted_address
+        description: "Formatted address of the property"
+        tests:
+          - not_null
+      - name: address_line1
+        description: "Primary address line of the property"
+        tests:
+          - not_null
+      - name: address_line2
+        description: "Secondary address line of the property"
+      - name: city
+        description: "City where the property is located"
+        tests:
+          - not_null
+      - name: state
+        description: "State where the property is located"
+        tests:
+          - not_null
+      - name: zip_code
+        description: "ZIP code of the property"
+        tests:
+          - not_null
+      - name: county
+        description: "County where the property is located"
+      - name: latitude
+        description: "Latitude coordinate of the property"
+        tests:
+          - not_null
+      - name: longitude
+        description: "Longitude coordinate of the property"
+        tests:
+          - not_null
+      - name: property_type
+        description: "Type of the property (e.g., residential, commercial)"
+      - name: bedrooms
+        description: "Number of bedrooms in the property"
+      - name: bathrooms
+        description: "Number of bathrooms in the property"
+      - name: square_footage
+        description: "Total square footage of the property"
+      - name: lot_size
+        description: "Size of the lot on which the property is located"
+      - name: year_built
+        description: "Year the property was built"
+      - name: last_sale_date
+        description: "Date of the last sale"
+      - name: last_sale_price
+        description: "Price of the last sale"
+      - name: load_date
+        description: "Date the data was loaded into the system"

@@ -1,0 +1,43 @@
+version: 2
+
+models:
+  - name: landmark_polygon
+    description: "Dimension table for landmark polygons, enriched with zipcode information."
+    columns:
+      - name: landmark_id
+        description: "Unique identifier for the landmark."
+        tests:
+          - not_null
+          - unique
+      - name: landmark_name
+        description: "Name of the landmark."
+      - name: address
+        description: "Address of the landmark."
+      - name: feat_type
+        description: "Feature type of the landmark."
+      - name: sub_type
+        description: "Sub-type of the landmark."
+      - name: vanity_name
+        description: "Vanity name of the landmark."
+      - name: secondary_name
+        description: "Secondary name of the landmark."
+      - name: bldg
+        description: "Building information related to the landmark."
+      - name: parent_name
+        description: "Parent name of the landmark."
+      - name: parent_type
+        description: "Parent type of the landmark."
+      - name: acreage
+        description: "Acreage of the landmark."
+      - name: parent_acreage
+        description: "Parent acreage of the landmark."
+      - name: shape_area
+        description: "Area of the landmark shape."
+      - name: shape_length
+        description: "Length of the landmark shape."
+      - name: polygon_type
+        description: "Type of the polygon representing the landmark."
+      - name: polygon_coordinates
+        description: "Coordinates defining the polygon shape of the landmark."
+      - name: zip_code
+        description: "Zip code associated with the landmark."
