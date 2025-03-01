@@ -1,54 +1,17 @@
-{{
-  config(
-    materialized = 'incremental',
-    unique_key = 'listing_sk',
-    incremental_strategy = 'merge'
-  )
-}}
-
+create or replace transient table DATAEXPERT_STUDENT.jmusni07.fct_rent_listing
+as
+(
 WITH rent_listings AS (
-  SELECT
-    PROPERTY_ID,
-    FORMATTED_ADDRESS,
-    ADDRESS_LINE_1,
-    ADDRESS_LINE_2,
-    CITY,
-    STATE,
-    ZIP_CODE,
-    COUNTY,
-    LATITUDE,
-    LONGITUDE,
-    PROPERTY_TYPE,
-    LOT_SIZE,
-    STATUS,
-    RENT_PRICE,
-    LISTING_TYPE,
-    LISTED_DATE,
-    REMOVED_DATE,
-    CREATED_DATE,
-    LAST_SEEN_DATE,
-    DAYS_ON_MARKET,
-    MLS_NAME,
-    MLS_NUMBER,
-    LOAD_DATE,
-    PROPERTY_STATUS,
-    LISTING_ID
+  SELECT *
   FROM {{ ref('stg_daily_rent_listing') }}
-  
-  {% if is_incremental() %}
-    WHERE LOAD_DATE > (SELECT MAX(LOAD_DATE) FROM {{ this }})
-  {% else %}
-    WHERE 1=1  -- Process all data on first run
-  {% endif %}
 )
-
 SELECT
-  {{ dbt_utils.generate_surrogate_key(['LISTING_ID', 'LOAD_DATE']) }} as listing_sk,
+  md5(cast(coalesce(cast(l.LISTING_ID as TEXT), '_dbt_utils_surrogate_key_null_') || '-' || coalesce(cast(l.LOAD_DATE as TEXT), '_dbt_utils_surrogate_key_null_') as TEXT)) as listing_sk,
   l.LISTING_ID,
-  p.property_sk,
-  s.status_sk,
-  loc.location_sk,
-  m.mls_sk,
+  COALESCE(p.property_sk, md5(cast(l.PROPERTY_ID as TEXT))) as property_sk,
+  COALESCE(s.status_sk, md5(cast(l.STATUS as TEXT))) as status_sk,
+  COALESCE(loc.location_sk, md5(cast(coalesce(l.CITY, '') || '-' || coalesce(l.STATE, '') || '-' || coalesce(l.ZIP_CODE, '') as TEXT))) as location_sk,
+  COALESCE(m.mls_sk, md5(cast(coalesce(l.MLS_NAME, '') || '-' || coalesce(l.MLS_NUMBER, '') as TEXT))) as mls_sk,
   -- Date dimensions
   TO_DATE(l.LOAD_DATE) as load_date_sk,
   TO_DATE(l.LISTED_DATE) as listed_date_sk,
@@ -63,11 +26,10 @@ SELECT
   l.LISTING_TYPE,
   l.LOAD_DATE
 FROM rent_listings l
-JOIN {{ ref('dim_property') }} p 
+LEFT JOIN DATAEXPERT_STUDENT.jmusni07.dim_property p 
   ON l.PROPERTY_ID = p.PROPERTY_ID 
-  AND l.LOAD_DATE >= p.valid_from 
-  AND (l.LOAD_DATE < p.valid_to OR p.valid_to IS NULL)
-JOIN {{ ref('dim_listing_status') }} s 
+  -- Remove date filtering entirely for first load
+LEFT JOIN DATAEXPERT_STUDENT.jmusni07.dim_listing_status s 
   ON (
     CASE
       WHEN l.STATUS = 'active' THEN 'A'
@@ -76,11 +38,12 @@ JOIN {{ ref('dim_listing_status') }} s
       ELSE 'FR' -- Default for rent listings
     END
   ) = s.status_code
-JOIN {{ ref('dim_location') }} loc 
+LEFT JOIN DATAEXPERT_STUDENT.jmusni07.dim_location loc 
   ON l.CITY = loc.CITY 
   AND l.STATE = loc.STATE 
   AND l.ZIP_CODE = loc.ZIP_CODE 
   AND l.COUNTY = loc.COUNTY
-LEFT JOIN {{ ref('dim_mls') }} m 
+LEFT JOIN DATAEXPERT_STUDENT.jmusni07.dim_mls m 
   ON l.MLS_NAME = m.MLS_NAME 
   AND l.MLS_NUMBER = m.MLS_NUMBER
+);
