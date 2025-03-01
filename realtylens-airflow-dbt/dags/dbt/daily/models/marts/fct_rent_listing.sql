@@ -61,14 +61,12 @@ SELECT
 FROM rent_listings l
 LEFT JOIN {{ ref('dim_property') }} p 
   ON l.PROPERTY_ID = p.PROPERTY_ID 
-  AND l.LOAD_DATE::DATE >= p.valid_from 
-  AND (l.LOAD_DATE::DATE < p.valid_to OR p.valid_to IS NULL)
+      AND p.is_current =1
 LEFT JOIN {{ ref('dim_listing_status') }} s 
   ON (
     CASE
-      WHEN l.STATUS = 'active' THEN 'A'
-      WHEN l.STATUS = 'inactive' THEN 'I'
-      WHEN l.LISTING_TYPE = 'For Rent' THEN 'FR'
+      WHEN l.STATUS = 'Active' THEN 'A'
+      WHEN l.STATUS = 'Inactive' THEN 'I'
       ELSE 'UNKNOWN'
     END
   ) = s.status_code
