@@ -2,8 +2,7 @@
   config(
     materialized = 'incremental',
     unique_key = 'listing_sk',
-    incremental_strategy = 'merge',
-    post_hook=["{{ log('Rows affected: ' ~ adapter.get_rows_affected(), info=True) }}"]
+    incremental_strategy = 'merge'
   )
 }}
 
@@ -29,8 +28,8 @@ WITH sale_listings AS (
     LISTING_ID
   FROM {{ ref('stg_daily_sale_listing') }}
   
-  {% if is_incremental() and adapter.get_relation(this.database, this.schema, this.name) is not none %}
-    WHERE LOAD_DATE > (SELECT COALESCE(MAX(LOAD_DATE), '1900-01-01'::DATE) FROM {{ this }})
+  {% if is_incremental() and not flags.FULL_REFRESH %}
+    WHERE LOAD_DATE::DATE > (SELECT COALESCE(MAX(load_date_sk), '1900-01-01'::DATE) FROM {{ this }})
   {% endif %}
 )
 
@@ -42,7 +41,7 @@ SELECT
   loc.location_sk,
   m.mls_sk,
   
-  -- Date dimensions with Snowflake's direct cast operator
+  -- Date dimensions with direct casting
   l.LOAD_DATE::DATE as load_date_sk,
   l.LISTED_DATE::DATE as listed_date_sk,
   l.REMOVED_DATE::DATE as removed_date_sk,
