@@ -1,7 +1,7 @@
 version: 2
 
 models:
-  - name: fact_rent_listings
+  - name: fct_rent_listing
     description: >
       Incremental fact table tracking rental property listings with their associations 
       to dimension tables and fact measurements like rent price and days on market.
