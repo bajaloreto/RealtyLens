@@ -37,6 +37,8 @@ WITH sale_listings AS (
   
   {% if is_incremental() %}
     WHERE LOAD_DATE > (SELECT MAX(LOAD_DATE) FROM {{ this }})
+  {% else %}
+    -- First run - process all data
   {% endif %}
 )
 
