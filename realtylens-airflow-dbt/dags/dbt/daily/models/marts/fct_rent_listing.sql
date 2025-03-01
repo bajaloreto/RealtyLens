@@ -1,90 +1,82 @@
-version: 2
+{{
+  config(
+    materialized = 'incremental',
+    unique_key = 'listing_sk',
+    incremental_strategy = 'merge'
+  )
+}}
 
-models:
-  - name: fct_rent_listing
-    description: >
-      Incremental fact table tracking rental property listings with their associations 
-      to dimension tables and fact measurements like rent price and days on market.
-    config:
-      materialized: incremental
-      unique_key: listing_sk
-      incremental_strategy: merge
-    columns:
-      - name: listing_sk
-        description: Primary surrogate key for the listing
-        tests:
-          - not_null
-          - unique
-      
-      - name: listing_id
-        description: Natural key for the listing
-        tests:
-          - not_null
-      
-      - name: property_sk
-        description: Foreign key to dim_property
-        tests:
-          - relationships:
-              to: ref('dim_property')
-              field: property_sk
-              severity: warn
-      
-      - name: status_sk
-        description: Foreign key to dim_listing_status
-        tests:
-          - relationships:
-              to: ref('dim_listing_status')
-              field: status_sk
-              severity: warn
-      
-      - name: location_sk
-        description: Foreign key to dim_location
-        tests:
-          - relationships:
-              to: ref('dim_location')
-              field: location_sk
-              severity: warn
-      
-      - name: mls_sk
-        description: Foreign key to dim_mls
-        tests:
-          - relationships:
-              to: ref('dim_mls')
-              field: mls_sk
-              severity: warn
-      
-      - name: load_date_sk
-        description: Date when the listing was loaded
-      
-      - name: listed_date_sk
-        description: Date when the property was listed for rent
-      
-      - name: removed_date_sk
-        description: Date when the property was removed
-      
-      - name: created_date_sk
-        description: Date when the listing was created
-      
-      - name: last_seen_date_sk
-        description: Date when the listing was last seen
-      
-      - name: rent_price
-        description: Rental price for the property
-      
-      - name: days_on_market
-        description: Number of days on the market
-      
-      - name: property_status
-        description: Current property status
-      
-      - name: status
-        description: Current listing status
-      
-      - name: listing_type
-        description: Type of listing
-      
-      - name: load_date
-        description: Raw load date from source
-      
-      - name: etl_timestamp
-        description: Processing timestamp
+WITH rent_listings AS (
+  SELECT
+    PROPERTY_ID,
+    CITY,
+    STATE,
+    ZIP_CODE,
+    COUNTY,
+    STATUS,
+    RENT_PRICE,
+    LISTING_TYPE,
+    LISTED_DATE,
+    REMOVED_DATE,
+    CREATED_DATE,
+    LAST_SEEN_DATE,
+    DAYS_ON_MARKET,
+    MLS_NAME,
+    MLS_NUMBER,
+    LOAD_DATE,
+    PROPERTY_STATUS,
+    LISTING_ID
+  FROM {{ ref('stg_daily_rent_listing') }}
+  
+  {% if is_incremental() %}
+    WHERE LOAD_DATE > (SELECT MAX(LOAD_DATE) FROM {{ this }})
+  {% endif %}
+)
+
+SELECT
+  {{ dbt_utils.generate_surrogate_key(['LISTING_ID', 'LOAD_DATE']) }} as listing_sk,
+  l.LISTING_ID,
+  p.property_sk,
+  s.status_sk,
+  loc.location_sk,
+  m.mls_sk,
+  
+  -- Date dimensions with safe conversion
+  TRY_TO_DATE(l.LOAD_DATE) as load_date_sk,
+  TRY_TO_DATE(l.LISTED_DATE) as listed_date_sk,
+  TRY_TO_DATE(l.REMOVED_DATE) as removed_date_sk,
+  TRY_TO_DATE(l.CREATED_DATE) as created_date_sk,
+  TRY_TO_DATE(l.LAST_SEEN_DATE) as last_seen_date_sk,
+  
+  -- Facts
+  l.RENT_PRICE,
+  l.DAYS_ON_MARKET,
+  l.PROPERTY_STATUS,
+  l.STATUS,
+  l.LISTING_TYPE,
+  l.LOAD_DATE,
+  
+  -- Metadata
+  CURRENT_TIMESTAMP() as etl_timestamp
+FROM rent_listings l
+LEFT JOIN {{ ref('dim_property') }} p 
+  ON l.PROPERTY_ID = p.PROPERTY_ID 
+  AND TRY_TO_DATE(l.LOAD_DATE) >= p.valid_from 
+  AND (TRY_TO_DATE(l.LOAD_DATE) < p.valid_to OR p.valid_to IS NULL)
+LEFT JOIN {{ ref('dim_listing_status') }} s 
+  ON (
+    CASE
+      WHEN l.STATUS = 'active' THEN 'A'
+      WHEN l.STATUS = 'inactive' THEN 'I'
+      WHEN l.LISTING_TYPE = 'For Rent' THEN 'FR'
+      ELSE 'UNKNOWN'
+    END
+  ) = s.status_code
+LEFT JOIN {{ ref('dim_location') }} loc 
+  ON l.CITY = loc.CITY
+  AND l.STATE = loc.STATE
+  AND l.ZIP_CODE = loc.ZIP_CODE
+  AND l.COUNTY = loc.COUNTY
+LEFT JOIN {{ ref('dim_mls') }} m 
+  ON l.MLS_NAME = m.MLS_NAME
+  AND l.MLS_NUMBER = m.MLS_NUMBER
