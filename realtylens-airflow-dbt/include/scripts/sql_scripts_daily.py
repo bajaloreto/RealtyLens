@@ -51,47 +51,47 @@ daily_property_sql = """
 
 
 
-    CREATE TABLE IF NOT EXISTS DATAEXPERT_STUDENT.jmusni07.FCT_RENT_LISTING (
-        listing_sk VARCHAR(255) PRIMARY KEY,
-        listing_id VARCHAR(255) NOT NULL,
-        property_sk VARCHAR(255),
-        status_sk VARCHAR(255),
-        location_sk VARCHAR(255),
-        mls_sk VARCHAR(255),
-        load_date_sk DATE,
-        listed_date_sk DATE,
-        removed_date_sk DATE,
-        created_date_sk DATE,
-        last_seen_date_sk DATE,
-        rent_price FLOAT,
-        days_on_market INTEGER,
-        property_status VARCHAR(50),
-        status VARCHAR(50),
-        listing_type VARCHAR(50),
-        load_date VARCHAR(50),
-        etl_timestamp TIMESTAMP
-    );
+        CREATE TABLE IF NOT EXISTS DATAEXPERT_STUDENT.jmusni07.FCT_RENT_LISTING (
+            listing_sk VARCHAR(255) PRIMARY KEY,
+            listing_id VARCHAR(255) NOT NULL,
+            property_sk VARCHAR(255),
+            status_sk VARCHAR(255),
+            location_sk VARCHAR(255),
+            mls_sk VARCHAR(255),
+            load_date_sk DATE,
+            listed_date_sk DATE,
+            removed_date_sk DATE,
+            created_date_sk DATE,
+            last_seen_date_sk DATE,
+            rent_price FLOAT,
+            days_on_market INTEGER,
+            property_status VARCHAR(50),
+            status VARCHAR(50),
+            listing_type VARCHAR(50),
+            load_date VARCHAR(50),
+            etl_timestamp TIMESTAMP
+        );
 
-    CREATE TABLE IF NOT EXISTS DATAEXPERT_STUDENT.jmusni07.FCT_SALE_LISTING (
-        listing_sk VARCHAR(255) PRIMARY KEY,
-        listing_id VARCHAR(255) NOT NULL,
-        property_sk VARCHAR(255),
-        status_sk VARCHAR(255),
-        location_sk VARCHAR(255),
-        mls_sk VARCHAR(255),
-        load_date_sk DATE,
-        listed_date_sk DATE,
-        removed_date_sk DATE,
-        created_date_sk DATE,
-        last_seen_date_sk DATE,
-        sale_price FLOAT,
-        days_on_market INTEGER,
-        property_status VARCHAR(50),
-        status VARCHAR(50),
-        listing_type VARCHAR(50),
-        load_date VARCHAR(50),
-        etl_timestamp TIMESTAMP
-    );        
+        CREATE TABLE IF NOT EXISTS DATAEXPERT_STUDENT.jmusni07.FCT_SALE_LISTING (
+            listing_sk VARCHAR(255) PRIMARY KEY,
+            listing_id VARCHAR(255) NOT NULL,
+            property_sk VARCHAR(255),
+            status_sk VARCHAR(255),
+            location_sk VARCHAR(255),
+            mls_sk VARCHAR(255),
+            load_date_sk DATE,
+            listed_date_sk DATE,
+            removed_date_sk DATE,
+            created_date_sk DATE,
+            last_seen_date_sk DATE,
+            sale_price FLOAT,
+            days_on_market INTEGER,
+            property_status VARCHAR(50),
+            status VARCHAR(50),
+            listing_type VARCHAR(50),
+            load_date VARCHAR(50),
+            etl_timestamp TIMESTAMP
+        );        
 
 
         CREATE OR REPLACE TABLE DATAEXPERT_STUDENT.jmusni07.raw_daily_sale_listing AS
