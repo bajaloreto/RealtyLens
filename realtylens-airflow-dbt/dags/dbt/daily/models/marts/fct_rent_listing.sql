@@ -41,12 +41,12 @@ SELECT
   loc.location_sk,
   m.mls_sk,
   
-  -- Date dimensions with simple conversion - removing TRY_CAST completely
-  COALESCE(TO_DATE(l.LOAD_DATE), CURRENT_DATE()) as load_date_sk,
-  TO_DATE(l.LISTED_DATE) as listed_date_sk,
-  TO_DATE(l.REMOVED_DATE) as removed_date_sk,
-  TO_DATE(l.CREATED_DATE) as created_date_sk,
-  TO_DATE(l.LAST_SEEN_DATE) as last_seen_date_sk,
+  -- Date dimensions with Snowflake's direct cast operator
+  l.LOAD_DATE::DATE as load_date_sk,
+  l.LISTED_DATE::DATE as listed_date_sk,
+  l.REMOVED_DATE::DATE as removed_date_sk,
+  l.CREATED_DATE::DATE as created_date_sk,
+  l.LAST_SEEN_DATE::DATE as last_seen_date_sk,
   
   -- Facts
   l.RENT_PRICE,
@@ -61,8 +61,8 @@ SELECT
 FROM rent_listings l
 LEFT JOIN {{ ref('dim_property') }} p 
   ON l.PROPERTY_ID = p.PROPERTY_ID 
-  AND COALESCE(TO_DATE(l.LOAD_DATE), CURRENT_DATE()) >= p.valid_from 
-  AND (COALESCE(TO_DATE(l.LOAD_DATE), CURRENT_DATE()) < p.valid_to OR p.valid_to IS NULL)
+  AND l.LOAD_DATE::DATE >= p.valid_from 
+  AND (l.LOAD_DATE::DATE < p.valid_to OR p.valid_to IS NULL)
 LEFT JOIN {{ ref('dim_listing_status') }} s 
   ON (
     CASE

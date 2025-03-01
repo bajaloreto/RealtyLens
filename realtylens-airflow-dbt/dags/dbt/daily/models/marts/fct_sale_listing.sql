@@ -6,7 +6,7 @@
   )
 }}
 
-WITH rent_listings AS (
+WITH sale_listings AS (
   SELECT
     PROPERTY_ID,
     CITY,
@@ -14,7 +14,7 @@ WITH rent_listings AS (
     ZIP_CODE,
     COUNTY,
     STATUS,
-    RENT_PRICE,
+    SALE_PRICE,
     LISTING_TYPE,
     LISTED_DATE,
     REMOVED_DATE,
@@ -26,7 +26,7 @@ WITH rent_listings AS (
     LOAD_DATE,
     PROPERTY_STATUS,
     LISTING_ID
-  FROM {{ ref('stg_daily_rent_listing') }}
+  FROM {{ ref('stg_daily_sale_listing') }}
   
   {% if is_incremental() %}
     WHERE LOAD_DATE > (SELECT MAX(LOAD_DATE) FROM {{ this }})
@@ -41,15 +41,15 @@ SELECT
   loc.location_sk,
   m.mls_sk,
   
-  -- Date dimensions with simple conversion - removing TRY_CAST completely
-  COALESCE(TO_DATE(l.LOAD_DATE), CURRENT_DATE()) as load_date_sk,
-  TO_DATE(l.LISTED_DATE) as listed_date_sk,
-  TO_DATE(l.REMOVED_DATE) as removed_date_sk,
-  TO_DATE(l.CREATED_DATE) as created_date_sk,
-  TO_DATE(l.LAST_SEEN_DATE) as last_seen_date_sk,
+  -- Date dimensions with no conversion to avoid type issues
+  l.LOAD_DATE::DATE as load_date_sk,
+  l.LISTED_DATE::DATE as listed_date_sk,
+  l.REMOVED_DATE::DATE as removed_date_sk,
+  l.CREATED_DATE::DATE as created_date_sk,
+  l.LAST_SEEN_DATE::DATE as last_seen_date_sk,
   
   -- Facts
-  l.RENT_PRICE,
+  l.SALE_PRICE,
   l.DAYS_ON_MARKET,
   l.PROPERTY_STATUS,
   l.STATUS,
@@ -58,17 +58,17 @@ SELECT
   
   -- Metadata
   CURRENT_TIMESTAMP() as etl_timestamp
-FROM rent_listings l
+FROM sale_listings l
 LEFT JOIN {{ ref('dim_property') }} p 
   ON l.PROPERTY_ID = p.PROPERTY_ID 
-  AND COALESCE(TO_DATE(l.LOAD_DATE), CURRENT_DATE()) >= p.valid_from 
-  AND (COALESCE(TO_DATE(l.LOAD_DATE), CURRENT_DATE()) < p.valid_to OR p.valid_to IS NULL)
+  AND l.LOAD_DATE::DATE >= p.valid_from 
+  AND (l.LOAD_DATE::DATE < p.valid_to OR p.valid_to IS NULL)
 LEFT JOIN {{ ref('dim_listing_status') }} s 
   ON (
     CASE
       WHEN l.STATUS = 'active' THEN 'A'
       WHEN l.STATUS = 'inactive' THEN 'I'
-      WHEN l.LISTING_TYPE = 'For Rent' THEN 'FR'
+      WHEN l.LISTING_TYPE = 'For Sale' THEN 'FS'
       ELSE 'UNKNOWN'
     END
   ) = s.status_code
