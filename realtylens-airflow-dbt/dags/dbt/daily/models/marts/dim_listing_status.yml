@@ -1,0 +1,16 @@
+version: 2
+
+models:
+
+  - name: dim_listing_status
+    description: Status - 'For Sale/For Rent', 'For Sale', 'Churned', 'Inactive', 'Active', 'New', 'Resurrected'
+    columns:
+      - name: status_sk
+        description: Surrogate key for status dimension
+        tests:
+          - unique
+          - not_null
+      - name: status_code
+        description: Short code for status
+      - name: status_description
+        description: Description of status

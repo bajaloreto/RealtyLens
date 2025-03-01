@@ -1,0 +1,42 @@
+version: 2
+
+models:
+  - name: fct_rent_listing  # Make sure this matches your SQL file name (without .sql)
+    description: >
+      Incremental fact table tracking rental property listings with their associations 
+      to dimension tables and fact measurements like rent price and days on market.
+    config:
+      materialized: incremental
+      unique_key: listing_sk
+      incremental_strategy: merge
+    columns:
+      - name: listing_sk
+        description: Primary surrogate key for the listing
+        tests:
+          - not_null
+          - unique
+      
+      - name: listing_id
+        description: Natural key for the listing
+        tests:
+          - not_null
+      
+      - name: property_sk
+        description: Foreign key to dim_property
+        tests:
+          - relationships:
+              to: ref('dim_property')
+              field: property_sk
+              severity: warn
+      
+      - name: status_sk
+        description: Foreign key to dim_listing_status
+        tests:
+          - relationships:
+              to: ref('dim_listing_status')
+              field: status_sk
+              severity: warn
+              config:
+                where: "status_sk is not null"  # Only test non-null values
+      
+      # ... remaining columns same as before

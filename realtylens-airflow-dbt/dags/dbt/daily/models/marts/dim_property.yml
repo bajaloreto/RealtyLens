@@ -1,0 +1,38 @@
+version: 2
+
+models:
+  # Dimension Tables (First)
+  - name: dim_property
+    description: SCD Type 2 - Consolidated property dimensions from both rent and sale listings - Track changes
+    columns:
+      - name: property_sk
+        description: Surrogate key for property dimension
+        tests:
+          - unique
+          - not_null
+      - name: PROPERTY_ID
+        description: Natural key for property
+      - name: FORMATTED_ADDRESS
+        description: Complete address in a formatted string
+      - name: ADDRESS_LINE_1
+        description: First line of address
+      - name: ADDRESS_LINE_2
+        description: Second line of address (apt/unit number)
+      - name: PROPERTY_TYPE
+        description: Type of property
+      - name: BEDROOMS
+        description: Number of bedrooms
+      - name: BATHROOMS
+        description: Number of bathrooms
+      - name: SQUARE_FOOTAGE
+        description: Total interior area in square feet
+      - name: LOT_SIZE
+        description: Size of the property lot
+      - name: YEAR_BUILT
+        description: Year the property was built
+      - name: valid_from
+        description: Date from which this version is valid
+      - name: valid_to
+        description: Date until which this version is valid
+      - name: is_current
+        description: Flag indicating if this is the current version

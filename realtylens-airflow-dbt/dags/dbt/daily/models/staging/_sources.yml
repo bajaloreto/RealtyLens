@@ -1,0 +1,12 @@
+# models/staging/_sources.yml
+version: 2
+
+sources:
+  - name: realtylens
+    database: DATAEXPERT_STUDENT
+    schema: jmusni07
+    tables:
+      - name: lkp_zoning_polygon
+      - name: lkp_property_details
+      - name: raw_daily_sale_listing
+      - name: raw_daily_rent_listing
