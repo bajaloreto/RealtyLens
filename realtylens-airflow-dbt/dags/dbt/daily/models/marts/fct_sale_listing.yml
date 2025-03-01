@@ -1,32 +1,90 @@
 version: 2
 
 models:
-
-  - name: fct_sale_listing
-    description: Incremental on load date
+  - name: fact_sale_listings
+    description: >
+      Incremental fact table tracking sale property listings with their associations 
+      to dimension tables and fact measurements like sale price and days on market.
+    config:
+      materialized: incremental
+      unique_key: listing_sk
+      incremental_strategy: merge
     columns:
       - name: listing_sk
-        description: Surrogate key for listing fact
+        description: Primary surrogate key for the listing
         tests:
-          - unique
           - not_null
-      - name: LISTING_ID
-        description: Natural key for listing
+          - unique
+      
+      - name: listing_id
+        description: Natural key for the listing
+        tests:
+          - not_null
+      
       - name: property_sk
-        description: Foreign key to property dimension
+        description: Foreign key to dim_property
+        tests:
+          - relationships:
+              to: ref('dim_property')
+              field: property_sk
+              severity: warn
+      
       - name: status_sk
-        description: Foreign key to status dimension
+        description: Foreign key to dim_listing_status
+        tests:
+          - relationships:
+              to: ref('dim_listing_status')
+              field: status_sk
+              severity: warn
+      
       - name: location_sk
-        description: Foreign key to location dimension
+        description: Foreign key to dim_location
+        tests:
+          - relationships:
+              to: ref('dim_location')
+              field: location_sk
+              severity: warn
+      
+      - name: mls_sk
+        description: Foreign key to dim_mls
+        tests:
+          - relationships:
+              to: ref('dim_mls')
+              field: mls_sk
+              severity: warn
+      
       - name: load_date_sk
-        description: Date the record was loaded
+        description: Date when the listing was loaded
+      
       - name: listed_date_sk
-        description: Date the property was listed
-      - name: SALE_PRICE
-        description: Asking sale price
-      - name: DAYS_ON_MARKET
-        description: Number of days the listing has been active
-      - name: STATUS
-        description: Current status of the listing
-      - name: LOAD_DATE
-        description: Date the record was loaded
+        description: Date when the property was listed for sale
+      
+      - name: removed_date_sk
+        description: Date when the property was removed
+      
+      - name: created_date_sk
+        description: Date when the listing was created
+      
+      - name: last_seen_date_sk
+        description: Date when the listing was last seen
+      
+      - name: sale_price
+        description: Sale price for the property
+      
+      - name: days_on_market
+        description: Number of days on the market
+      
+      - name: property_status
+        description: Current property status
+      
+      - name: status
+        description: Current listing status
+      
+      - name: listing_type
+        description: Type of listing
+      
+      - name: load_date
+        description: Raw load date from source
+      
+      - name: etl_timestamp
+        description: Processing timestamp
