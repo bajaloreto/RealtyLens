@@ -1,7 +1,7 @@
 version: 2
 
 models:
-    - name: stg_zipcode_polygon
+    - name: lkp_zip_code_polygon
       description: "Raw zipcode polygon data from the AWS zip codes polygon stage"
       columns:
         - name: zip_code_id

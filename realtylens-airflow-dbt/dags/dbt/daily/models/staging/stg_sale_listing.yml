@@ -1,0 +1,69 @@
+version: 2
+
+models:
+  - name: stg_daily_sale_listing
+    description: Staging model for property sale listings with snake_case columns
+    columns:
+      - name: property_id
+        description: Unique identifier for the property
+        tests:
+          - not_null
+      - name: formatted_address
+        description: Complete formatted address
+      - name: address_line_1
+        description: First line of the address
+      - name: address_line_2
+        description: Second line of the address (if available)
+      - name: city
+        description: City name
+        tests:
+          - not_null
+      - name: state
+        description: State code
+        tests:
+          - not_null
+      - name: zip_code
+        description: ZIP code
+      - name: county
+        description: County name
+      - name: latitude
+        description: Geographic latitude
+      - name: longitude
+        description: Geographic longitude
+      - name: property_type
+        description: Type of property (house, condo, etc.)
+      - name: lot_size
+        description: Size of the lot in acres
+      - name: status
+        description: Current listing status
+      - name: sale_price
+        description: Sale price in USD
+      - name: listing_type
+        description: Type of listing
+      - name: listed_date
+        description: Date the property was listed
+      - name: removed_date
+        description: Date the property was removed from listing
+      - name: created_date
+        description: Date the listing was created
+      - name: last_seen_date
+        description: Date the listing was last seen
+      - name: days_on_market
+        description: Number of days the property has been on market
+      - name: mls_name
+        description: Name of the Multiple Listing Service
+      - name: mls_number
+        description: MLS listing number
+      - name: load_date
+        description: Date the data was loaded
+        tests:
+          - not_null
+      - name: property_status
+        description: Property listing status (For Sale)
+        tests:
+          - not_null
+      - name: listing_id
+        description: Unique identifier for this specific sale listing
+        tests:
+          - not_null
+          - unique

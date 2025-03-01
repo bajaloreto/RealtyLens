@@ -1,7 +1,7 @@
 version: 2
 
 models:
-  - name: property_details
+  - name: lkp_property_details
     description: "This model enriches property details with zoning information based on latitude and longitude."
     columns:
       - name: property_id

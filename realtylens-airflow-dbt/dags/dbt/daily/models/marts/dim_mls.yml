@@ -1,0 +1,15 @@
+version: 2
+
+models:
+  - name: dim_mls
+    description: Multiple Listing Service dimension
+    columns:
+      - name: mls_sk
+        description: Surrogate key for MLS dimension
+        tests:
+          - unique
+          - not_null
+      - name: MLS_NAME
+        description: Name of the MLS
+      - name: MLS_NUMBER
+        description: MLS reference number

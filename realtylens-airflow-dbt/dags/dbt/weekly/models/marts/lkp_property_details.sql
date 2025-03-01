@@ -14,6 +14,7 @@ zoning AS (
         zoning_id,
         zoning_code,
         zoning_long_code,
+        zoning_group,
         polygon_coordinates  -- Assuming you have polygon_coordinates in zoning details
     FROM {{ ref('stg_zoning_polygon') }}  -- Reference the zoning staging model
 )
@@ -22,6 +23,7 @@ SELECT
     p.*,  -- Select all columns from the property details
     z.zoning_code,
     z.zoning_long_code,
+    z.zoning_group,
     z.zoning_id,
     z.polygon_coordinates,
     row_number() over (partition by p.property_id order by z.zoning_id desc) as rn

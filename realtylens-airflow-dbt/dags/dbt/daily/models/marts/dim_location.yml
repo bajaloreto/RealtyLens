@@ -1,0 +1,20 @@
+version: 2
+
+models:
+
+  - name: dim_location
+    description: Geographic location dimension
+    columns:
+      - name: location_sk
+        description: Surrogate key for location dimension
+        tests:
+          - unique
+          - not_null
+      - name: CITY
+        description: City name
+      - name: STATE
+        description: State code
+      - name: ZIP_CODE
+        description: Postal code
+      - name: COUNTY
+        description: County name

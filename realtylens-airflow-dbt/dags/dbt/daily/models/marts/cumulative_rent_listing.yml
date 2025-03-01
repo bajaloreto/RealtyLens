@@ -1,0 +1,29 @@
+version: 2
+
+models:
+  - name: cumulative_rent_listing
+    description: Track changes when property becomes inactive, active, new, churned, resurrected, price went down, price went up
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - PROPERTY_ID
+            - date
+    columns:
+      - name: PROPERTY_ID
+        description: Unique identifier for the property
+        tests:
+          - not_null
+      - name: first_listed_date
+        description: Date the property was first listed
+        tests:
+          - not_null
+      - name: date
+        description: Date of this record
+        tests:
+          - not_null
+      - name: property_state
+        description: State of the property (New, Retained, Churned, etc.)
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['New', 'Retained', 'Inactive', 'Churned', 'Resurrected']

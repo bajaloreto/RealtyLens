@@ -1,7 +1,7 @@
 version: 2
 
 models:
-  - name: landmark_polygon
+  - name: lkp_landmarks_polygon
     description: "Dimension table for landmark polygons, enriched with zipcode information."
     columns:
       - name: landmark_id

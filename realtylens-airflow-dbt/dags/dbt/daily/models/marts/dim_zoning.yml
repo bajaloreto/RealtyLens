@@ -1,0 +1,15 @@
+models:
+  - name: dim_zoning
+    description: Zoning information
+    columns:
+      - name: zoning_sk
+        description: Surrogate key for zoning dimension
+        tests:
+          - unique
+          - not_null
+      - name: ZONING_ID
+        description: Natural key for zoning record
+      - name: ZONING_CODE
+        description: Short code for zoning type
+      - name: ZONING_GROUP
+        description: Category of zoning

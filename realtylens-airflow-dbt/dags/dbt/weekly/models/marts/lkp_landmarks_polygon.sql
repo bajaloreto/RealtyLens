@@ -22,7 +22,7 @@ with stg_landmark_polygon as (
         l.polygon_coordinates,
         z.zip_code
     from {{ ref('stg_landmark_polygon') }} l
-    join {{ ref('stg_zipcode_polygon') }} z
+    join {{ ref('stg_zip_code_polygon') }} z
     on ST_WITHIN(l.polygon_coordinates, z.polygon_coordinates)
 )
 

@@ -1,0 +1,32 @@
+version: 2
+
+models:
+
+  - name: fct_sale_listing
+    description: Incremental on load date
+    columns:
+      - name: listing_sk
+        description: Surrogate key for listing fact
+        tests:
+          - unique
+          - not_null
+      - name: LISTING_ID
+        description: Natural key for listing
+      - name: property_sk
+        description: Foreign key to property dimension
+      - name: status_sk
+        description: Foreign key to status dimension
+      - name: location_sk
+        description: Foreign key to location dimension
+      - name: load_date_sk
+        description: Date the record was loaded
+      - name: listed_date_sk
+        description: Date the property was listed
+      - name: SALE_PRICE
+        description: Asking sale price
+      - name: DAYS_ON_MARKET
+        description: Number of days the listing has been active
+      - name: STATUS
+        description: Current status of the listing
+      - name: LOAD_DATE
+        description: Date the record was loaded

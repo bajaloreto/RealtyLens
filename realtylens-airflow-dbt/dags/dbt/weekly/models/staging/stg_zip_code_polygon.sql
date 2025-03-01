@@ -14,7 +14,7 @@ WITH raw_data AS (
         geometry_type AS polygon_type,
         TO_GEOGRAPHY(geometry_json) AS polygon_coordinates,
         load_date
-    FROM {{ source('jmusni07', 'raw_zipcode_polygon') }} 
+    FROM {{ source('realtylens', 'raw_zip_code_polygon') }} 
 )
 
 SELECT

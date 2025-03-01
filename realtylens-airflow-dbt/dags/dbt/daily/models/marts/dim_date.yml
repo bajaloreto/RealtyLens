@@ -1,0 +1,22 @@
+version: 2
+
+models:
+
+  - name: dim_date
+    description: Date dimension
+    columns:
+      - name: date_sk
+        description: Date value as primary key
+        tests:
+          - unique
+          - not_null
+      - name: date_day
+        description: Date in DATE format
+      - name: day_of_month
+        description: Day number within month (1-31)
+      - name: month_number
+        description: Month number (1-12)
+      - name: year_number
+        description: Year (YYYY)
+      - name: day_of_week
+        description: Day of week (0-6, 0=Sunday)

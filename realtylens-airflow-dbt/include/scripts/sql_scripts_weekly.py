@@ -36,7 +36,7 @@ refresh_stages_sql = """
 
 
 raw_data_load_sql = """
-CREATE OR REPLACE TABLE dataexpert_student.jmusni07.raw_zipcode_polygon AS
+CREATE OR REPLACE TABLE dataexpert_student.jmusni07.raw_zip_code_polygon AS
 SELECT 
   f.value:properties:OBJECTID as OBJECTID,
   f.value:properties:CODE as CODE,

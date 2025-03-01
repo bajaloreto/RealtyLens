@@ -1,7 +1,7 @@
 version: 2
 
 models:
-  - name: zoning_polygon
+  - name: lkp_zoning_polygon
     description: "This model enriches zoning data with zip codes based on spatial relationships."
     columns:
       - name: zoning_id

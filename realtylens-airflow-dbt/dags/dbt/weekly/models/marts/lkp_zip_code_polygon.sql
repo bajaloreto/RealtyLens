@@ -6,4 +6,4 @@
 
 SELECT
     *
-FROM {{ ref('stg_zipcode_polygon') }} 
+FROM {{ ref('stg_zip_code_polygon') }} 

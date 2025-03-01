@@ -31,10 +31,10 @@ def check_existing_data(ds, task_instance):
         if 'Contents' in sales_objects and 'Contents' in rental_objects:
             print(f"Data already exists for {ds}")
             task_instance.xcom_push(key='extract_date', value=ds)
-            return 'create_schema'
+            return 'create_snowflake_schema'
         else:
             print(f"No existing data found for {ds}")
-            return 'extract_data'
+            return 'extract_daily_property_data'
             
     except Exception as e:
         print(f"Error in check_existing_data: {str(e)}")

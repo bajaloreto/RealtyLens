@@ -2,11 +2,11 @@
 version: 2
 
 sources:
-  - name: jmusni07
+  - name: realtylens
     database: DATAEXPERT_STUDENT
     schema: jmusni07
     tables:
       - name: raw_property_details
       - name: raw_zoning_polygon
       - name: raw_landmark_polygon
-      - name: raw_zipcode_polygon
+      - name: raw_zip_code_polygon

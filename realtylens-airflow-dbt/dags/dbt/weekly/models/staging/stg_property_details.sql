@@ -23,7 +23,7 @@ WITH raw_data AS (
         lastSaleDate AS last_sale_date,
         lastSalePrice AS last_sale_price,
         load_date
-    FROM {{ source('jmusni07', 'raw_property_details') }} 
+    FROM {{ source('realtylens', 'raw_property_details') }} 
 )
 
 SELECT

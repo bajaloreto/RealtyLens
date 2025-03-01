@@ -20,7 +20,7 @@
        SELECT
            zip_code,
            polygon_coordinates  -- Include geometry for the join
-       FROM {{ ref('stg_zipcode_polygon') }}  -- Reference the zip code staging model
+       FROM {{ ref('stg_zip_code_polygon') }}  -- Reference the zip code staging model
    )
    , combined_data AS (
    SELECT
