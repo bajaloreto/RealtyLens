@@ -68,7 +68,7 @@ def enhanced_check_existing_data(ds, task_instance, **kwargs):
 default_args = {
    'owner': 'Jonathan Musni', 
    'start_date': datetime(2025, 2, 4), 
-   'retries': 1,
+   'retries': 3,
    'depends_on_past': True,
 }
 
