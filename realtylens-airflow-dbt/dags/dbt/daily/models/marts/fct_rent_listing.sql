@@ -2,7 +2,8 @@
   config(
     materialized = 'incremental',
     unique_key = 'listing_sk',
-    incremental_strategy = 'merge'
+    incremental_strategy = 'merge',
+    post_hook=["{{ log('Rows affected: ' ~ adapter.get_rows_affected(), info=True) }}"]
   )
 }}
 
@@ -28,8 +29,8 @@ WITH rent_listings AS (
     LISTING_ID
   FROM {{ ref('stg_daily_rent_listing') }}
   
-  {% if is_incremental() %}
-    WHERE LOAD_DATE > (SELECT MAX(LOAD_DATE) FROM {{ this }})
+  {% if is_incremental() and adapter.get_relation(this.database, this.schema, this.name) is not none %}
+    WHERE LOAD_DATE > (SELECT COALESCE(MAX(LOAD_DATE), '1900-01-01'::DATE) FROM {{ this }})
   {% endif %}
 )
 
