@@ -1,2 +1,2 @@
-apache-airflow-providers-common-sql>=1.20.0
 apache-airflow-providers-snowflake==5.1.1
+apache-airflow-providers-amazon
