@@ -1,7 +1,7 @@
 version: 2
 
 models:
-  - name: fact_sale_listings
+  - name: fct_sale_listing
     description: >
       Incremental fact table tracking sale property listings with their associations 
       to dimension tables and fact measurements like sale price and days on market.
