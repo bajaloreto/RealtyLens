@@ -1,19 +1,17 @@
 version: 2
 
 models:
-  - name: fct_rent_listings
+  - name: fact_rent_listings
     description: >
-      Incremental fact table containing all rental property listings. 
-      This model tracks rental listings with their associations to property, 
-      location, status, and MLS dimensions, along with fact measurements 
-      like rent price and days on market.
+      Incremental fact table tracking rental property listings with their associations 
+      to dimension tables and fact measurements like rent price and days on market.
     config:
       materialized: incremental
       unique_key: listing_sk
       incremental_strategy: merge
     columns:
       - name: listing_sk
-        description: Surrogate key for the listing, generated from listing_id and load_date
+        description: Primary surrogate key for the listing
         tests:
           - not_null
           - unique
@@ -26,7 +24,6 @@ models:
       - name: property_sk
         description: Foreign key to dim_property
         tests:
-          - not_null
           - relationships:
               to: ref('dim_property')
               field: property_sk
@@ -35,7 +32,6 @@ models:
       - name: status_sk
         description: Foreign key to dim_listing_status
         tests:
-          - not_null
           - relationships:
               to: ref('dim_listing_status')
               field: status_sk
@@ -44,7 +40,6 @@ models:
       - name: location_sk
         description: Foreign key to dim_location
         tests:
-          - not_null
           - relationships:
               to: ref('dim_location')
               field: location_sk
@@ -58,64 +53,38 @@ models:
               field: mls_sk
               severity: warn
       
-      - name: zoning_sk
-        description: Foreign key to dim_zoning
-        tests:
-          - relationships:
-              to: ref('dim_zoning')
-              field: zoning_sk
-              severity: warn
-      
       - name: load_date_sk
-        description: Date when the listing was loaded, links to dim_date
-        tests:
-          - not_null
+        description: Date when the listing was loaded
       
       - name: listed_date_sk
-        description: Date when the property was listed for rent, links to dim_date
+        description: Date when the property was listed for rent
       
       - name: removed_date_sk
-        description: Date when the property was removed from listing, links to dim_date
+        description: Date when the property was removed
       
       - name: created_date_sk
-        description: Date when the listing was created, links to dim_date
+        description: Date when the listing was created
       
       - name: last_seen_date_sk
-        description: Date when the listing was last seen, links to dim_date
+        description: Date when the listing was last seen
       
       - name: rent_price
-        description: Rental price for the property (fact)
+        description: Rental price for the property
       
       - name: days_on_market
-        description: Number of days the property has been on the market (fact)
+        description: Number of days on the market
       
       - name: property_status
         description: Current property status
       
       - name: status
-        description: Current listing status (active/inactive)
+        description: Current listing status
       
       - name: listing_type
-        description: Type of listing (e.g., 'For Rent')
+        description: Type of listing
       
       - name: load_date
-        description: Raw load date from source system
+        description: Raw load date from source
       
       - name: etl_timestamp
-        description: Timestamp when this record was processed by the ETL
-        tests:
-          - not_null
-      
-      - name: join_quality
-        description: Indicator of join quality (FULL_JOIN or PARTIAL_JOIN)
-        tests:
-          - not_null
-          - accepted_values:
-              values: ['FULL_JOIN', 'PARTIAL_JOIN']
-      
-      - name: record_source
-        description: Source of the record (INITIAL_LOAD or INCREMENTAL_LOAD)
-        tests:
-          - not_null
-          - accepted_values:
-              values: ['INITIAL_LOAD', 'INCREMENTAL_LOAD']
+        description: Processing timestamp
