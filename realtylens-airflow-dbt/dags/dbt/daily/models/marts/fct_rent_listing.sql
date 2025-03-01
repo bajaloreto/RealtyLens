@@ -41,12 +41,12 @@ SELECT
   loc.location_sk,
   m.mls_sk,
   
-  -- Date dimensions with safe conversion
-  TRY_TO_DATE(l.LOAD_DATE) as load_date_sk,
-  TRY_TO_DATE(l.LISTED_DATE) as listed_date_sk,
-  TRY_TO_DATE(l.REMOVED_DATE) as removed_date_sk,
-  TRY_TO_DATE(l.CREATED_DATE) as created_date_sk,
-  TRY_TO_DATE(l.LAST_SEEN_DATE) as last_seen_date_sk,
+  -- Date dimensions with safe conversion - using Snowflake compatible approach
+  TRY_CAST(l.LOAD_DATE AS DATE) as load_date_sk,
+  TRY_CAST(l.LISTED_DATE AS DATE) as listed_date_sk,
+  TRY_CAST(l.REMOVED_DATE AS DATE) as removed_date_sk,
+  TRY_CAST(l.CREATED_DATE AS DATE) as created_date_sk,
+  TRY_CAST(l.LAST_SEEN_DATE AS DATE) as last_seen_date_sk,
   
   -- Facts
   l.RENT_PRICE,
@@ -61,8 +61,8 @@ SELECT
 FROM rent_listings l
 LEFT JOIN {{ ref('dim_property') }} p 
   ON l.PROPERTY_ID = p.PROPERTY_ID 
-  AND TRY_TO_DATE(l.LOAD_DATE) >= p.valid_from 
-  AND (TRY_TO_DATE(l.LOAD_DATE) < p.valid_to OR p.valid_to IS NULL)
+  AND TRY_CAST(l.LOAD_DATE AS DATE) >= p.valid_from 
+  AND (TRY_CAST(l.LOAD_DATE AS DATE) < p.valid_to OR p.valid_to IS NULL)
 LEFT JOIN {{ ref('dim_listing_status') }} s 
   ON (
     CASE
