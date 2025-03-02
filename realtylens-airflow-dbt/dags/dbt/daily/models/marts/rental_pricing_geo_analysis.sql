@@ -1,7 +1,6 @@
 {{
   config(
     materialized = 'table',
-    schema = 'marts',
     alias = 'rental_pricing_geo_analysis'
   )
 }}
@@ -15,7 +14,7 @@ WITH location_listings AS (
     r.load_date_sk,
     p.property_type,
     p.bedrooms,
-    p.ZONING_GROUP,
+    p.zoning_group,
     loc.city,
     loc.state,
     loc.zip_code
@@ -27,15 +26,9 @@ WITH location_listings AS (
     AND loc.zip_code IS NOT NULL
 )
 
-, with_geo AS (
-  SELECT
-    l.*,
-    z.POLYGON_COORDINATES
-  FROM location_listings l
-  LEFT JOIN {{ source('realtylens', 'lkp_zip_code_polygon') }} z
-    ON l.zip_code = z.ZIP_CODE
-)
-
+-- Instead of trying to aggregate GEOGRAPHY in the mart,
+-- we'll just keep the price metrics and zip codes
+-- and join with the polygon data in the dashboard
 SELECT
   CASE
     WHEN GROUPING(city) = 0 AND GROUPING(state) = 0 AND GROUPING(zip_code) = 0 AND GROUPING(property_type) = 0 AND GROUPING(bedrooms) = 0
@@ -64,13 +57,9 @@ SELECT
   PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY rent_price) as median_rent_price,
   MIN(rent_price) as min_rent_price,
   MAX(rent_price) as max_rent_price,
-  STDDEV(rent_price) as stddev_rent_price,
+  STDDEV(rent_price) as stddev_rent_price
   
-  -- Geographic data - we'll use the first non-null polygon for each group
-  -- This is an approximation, ideal approach would be to combine/dissolve polygons
-  MAX(POLYGON_COORDINATES) as zip_polygon
-  
-FROM with_geo
+FROM location_listings
 GROUP BY 
   load_date_sk,
   GROUPING SETS (
