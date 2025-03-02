@@ -32,7 +32,7 @@ WITH location_listings AS (
     l.*,
     z.POLYGON_COORDINATES
   FROM location_listings l
-  LEFT JOIN {{ ref('lkp_zip_code_polygon') }} z
+  LEFT JOIN {{ source('realtylens', 'lkp_zip_code_polygon') }} z
     ON l.zip_code = z.ZIP_CODE
 )
 
