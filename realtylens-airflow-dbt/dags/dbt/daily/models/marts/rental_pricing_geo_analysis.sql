@@ -15,7 +15,7 @@ WITH location_listings AS (
     r.load_date_sk,
     p.property_type,
     p.bedrooms,
-    p.zoning,
+    p.ZONING_GROUP,
     loc.city,
     loc.state,
     loc.zip_code
