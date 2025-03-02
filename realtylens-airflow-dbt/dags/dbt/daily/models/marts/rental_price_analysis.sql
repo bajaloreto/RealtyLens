@@ -1,3 +1,9 @@
+{{
+  config(
+    materialized = 'table'  )
+}}
+
+
 WITH philly_listings AS (
   SELECT
     r.listing_sk,
