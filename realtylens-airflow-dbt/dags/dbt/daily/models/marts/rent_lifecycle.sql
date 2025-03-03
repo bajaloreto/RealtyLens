@@ -51,6 +51,4 @@ ORDER BY
     WHEN lifecycle_stage = 'Month1' THEN 3
     WHEN lifecycle_stage = 'Month2' THEN 4
     WHEN lifecycle_stage = 'Extended' THEN 5
-  END;
-
-
+  END

@@ -30,4 +30,4 @@ SELECT
   -- Market health composite score (customize weights based on your business needs)
   (new_listings * 0.3) - (churned_listings * 0.2) - (price_decreases * 0.1) - (avg_days_on_market * 0.01) as market_health_score
 FROM market_metrics
-ORDER BY week DESC;
+ORDER BY week DESC

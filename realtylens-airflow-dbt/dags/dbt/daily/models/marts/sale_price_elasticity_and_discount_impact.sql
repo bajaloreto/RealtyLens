@@ -92,4 +92,4 @@ market_efficiency AS (
 )
 
 SELECT * FROM market_efficiency
-ORDER BY price_segment, days_segment;
+ORDER BY price_segment, days_segment

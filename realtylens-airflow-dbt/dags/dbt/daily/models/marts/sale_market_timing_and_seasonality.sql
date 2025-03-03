@@ -73,4 +73,4 @@ seasonal_metrics AS (
 )
 
 SELECT * FROM seasonal_metrics
-ORDER BY year_month DESC, price_segment;
+ORDER BY year_month DESC, price_segment
