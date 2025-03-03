@@ -19,7 +19,7 @@ WITH location_listings AS (
     loc.state,
     loc.zip_code
   FROM {{ ref('fct_rent_listing') }} r
-  JOIN {{ ref('dim_property') }} p ON r.property_sk = p.property_sk
+  LEFT JOIN {{ ref('dim_property') }} p ON r.property_sk = p.property_sk
   JOIN {{ ref('dim_location') }} loc ON r.location_sk = loc.location_sk
   WHERE 
     r.rent_price > 0
