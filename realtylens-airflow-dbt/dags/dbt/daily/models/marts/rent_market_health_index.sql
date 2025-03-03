@@ -39,4 +39,4 @@ SELECT
   avg_days_on_market,
   total_price_decreases
 FROM weekly_metrics
-ORDER BY week DESC;
+ORDER BY week DESC
