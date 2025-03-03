@@ -83,4 +83,4 @@ final_metrics AS (
 )
 
 SELECT * FROM final_metrics
-ORDER BY price_quintile, price_strategy;
+ORDER BY price_quintile, price_strategy
