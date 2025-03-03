@@ -77,4 +77,4 @@ SELECT
   (churned_listings * 1.0) / NULLIF(new_listings + resurrected_listings, 0) AS supply_demand_ratio
   
 FROM daily_metrics
-ORDER BY day DESC
+ORDER BY day DESC;
