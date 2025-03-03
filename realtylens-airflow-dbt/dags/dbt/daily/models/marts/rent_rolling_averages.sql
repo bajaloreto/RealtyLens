@@ -6,14 +6,14 @@
 
 WITH rent_daily_metrics AS (
   SELECT
-    date,
+    LOAD_DATE as date,
     PROPERTY_TYPE,
     STATUS,
     COUNT(1) as listing_count,
     AVG(RENT_PRICE) as avg_rent_price
   FROM {{ ref('fct_rent_listing') }} r
   JOIN {{ ref('dim_property') }} p ON r.property_sk = p.property_sk
-  GROUP BY date, PROPERTY_TYPE, STATUS
+  GROUP BY LOAD_DATE, PROPERTY_TYPE, STATUS
 ),
 
 windowed_metrics AS (
