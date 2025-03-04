@@ -10,7 +10,7 @@ import altair as alt
 import math
 
 # Import core functions from main app
-from realtylens_app import query_snowflake, get_snowflake_connection, render_db_indicator
+from Property_Map import query_snowflake, get_snowflake_connection, render_db_indicator
 
 # Page title
 st.title("📊 RealtyLens Market Insights")
