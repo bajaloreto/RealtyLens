@@ -7,7 +7,6 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import datetime
 import altair as alt
-import math
 
 # Import core functions from main app
 from Property_Map import query_snowflake, get_snowflake_connection, render_db_indicator
