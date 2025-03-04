@@ -10,3 +10,4 @@ sources:
       - name: lkp_property_details
       - name: raw_daily_sale_listing
       - name: raw_daily_rent_listing
+      - name: lkp_zip_code_polygon
