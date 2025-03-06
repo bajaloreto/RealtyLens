@@ -622,7 +622,7 @@ def display_property_details(property_data):
             ).add_to(property_map)
             
             # Display the map
-            folium_static(property_map, width=800, height=400)
+            folium_static(property_map, width=1000, height=600)
         else:
             st.warning("No location data available for this property")
         
@@ -1374,7 +1374,7 @@ def main():
             property_map = create_property_map(filtered_data, st.session_state.listing_type, show_zoning_toggle)
             
             # Display the map with full width
-            folium_static(property_map, width=800, height=600)
+            folium_static(property_map, width=1000, height=600)
             
             # Show investment metrics below the map if available for sales listings
             if st.session_state.listing_type == "sale" and 'PREDICTED_RENT_PRICE' in filtered_data.columns:
