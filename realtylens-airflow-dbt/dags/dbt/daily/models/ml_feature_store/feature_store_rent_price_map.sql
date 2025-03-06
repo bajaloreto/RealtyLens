@@ -5,9 +5,6 @@
 }}
 
 SELECT 
-    -- Generate identity column in Snowflake
-    IDENTITY(1,1) AS feature_store_id,
-    
     -- Record ID
     OBJECT_CONSTRUCT(
         'listing_id', r.listing_id,
