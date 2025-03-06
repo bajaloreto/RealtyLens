@@ -33,6 +33,10 @@ import matplotlib.pyplot as plt
 from folium.plugins import MarkerCluster
 import urllib.parse
 import json
+from folium import plugins
+import streamlit.components.v1 as components  # Rename to avoid conflict
+from folium import MacroElement
+from jinja2 import Template
 
 # ======= INITIALIZE SESSION STATE FIRST =======
 if 'snowflake_queries' not in st.session_state:
@@ -49,8 +53,8 @@ if 'db_hit_timestamp' not in st.session_state:
     st.session_state['db_hit_timestamp'] = None
 
 # ======= PERFORMANCE CONFIGURATION =======
-MAX_VISIBLE_MARKERS = 1000  # Limit markers for better performance
-ENABLE_DATA_SAMPLING = True  # Sample data for faster rendering
+MAX_VISIBLE_MARKERS = 5000  # Increased from 1000 to 5000
+ENABLE_DATA_SAMPLING = False  # Disabled sampling for full data display
 CACHE_EXPIRATION_DAYS = 30   # Longer cache for better performance
 
 # Create cache directory if it doesn't exist
@@ -240,7 +244,7 @@ def fix_all_session_state():
 
 # ======= DATA LOADING =======
 @st.cache_data
-def load_property_data(table_name, limit=1000):
+def load_property_data(table_name, limit=None):
     """Load property data with adaptability for different table structures"""
     try:
         # First, check if the table has LOAD_DATE and PROPERTY_SK
@@ -315,13 +319,44 @@ def load_property_data(table_name, limit=1000):
                 r.DAYS_ON_MARKET,
                 r.PROPERTY_STATUS,
                 r.STATUS
+            """
+            
+            # Add prediction columns if this is a rental listing
+            if "FCT_RENT_LISTING" in table_name:
+                query += """,
+                pred.PREDICTED_RENT_PRICE,
+                pred.RENT_TO_PRICE_RATIO,
+                pred.SALE_PRICE
+                """
+            elif "FCT_SALE_LISTING" in table_name:
+                # For sale listings, we need to join to the prediction table using property_sk
+                query += """,
+                pred.PREDICTED_RENT_PRICE,
+                pred.RENT_TO_PRICE_RATIO
+                """
+            
+            query += f"""
             FROM DATAEXPERT_STUDENT.JMUSNI07.{table_name} r
             JOIN DATAEXPERT_STUDENT.JMUSNI07.DIM_PROPERTY p 
                 ON r.PROPERTY_SK = p.PROPERTY_SK
             LEFT JOIN DATAEXPERT_STUDENT.JMUSNI07.DIM_ZONING z
                 ON p.ZONING_ID = z.ZONING_ID
+            """
+            
+            # Add join to predicted rent prices
+            if "FCT_RENT_LISTING" in table_name:
+                query += """
+                LEFT JOIN DATAEXPERT_STUDENT.JMUSNI07.PREDICTED_RENT_PRICES pred
+                    ON r.LISTING_ID = pred.LISTING_ID
+                """
+            elif "FCT_SALE_LISTING" in table_name:
+                query += """
+                LEFT JOIN DATAEXPERT_STUDENT.JMUSNI07.PREDICTED_RENT_PRICES pred
+                    ON r.LISTING_ID = pred.LISTING_ID
+                """
+            
+            query += f"""
             WHERE r.LOAD_DATE = (SELECT max_load_date FROM latest_load)
-            LIMIT {limit}
             """
         elif has_property_sk:
             # No LOAD_DATE, but we can still join to DIM_PROPERTY
@@ -351,11 +386,32 @@ def load_property_data(table_name, limit=1000):
                 r.DAYS_ON_MARKET,
                 r.PROPERTY_STATUS,
                 r.STATUS
+            """
+            
+            # Add prediction columns if this is a rental listing
+            if "FCT_RENT_LISTING" in table_name:
+                query += """,
+                pred.PREDICTED_RENT_PRICE,
+                pred.RENT_TO_PRICE_RATIO,
+                pred.SALE_PRICE
+                """
+            
+            query += f"""
             FROM DATAEXPERT_STUDENT.JMUSNI07.{table_name} r
             JOIN DATAEXPERT_STUDENT.JMUSNI07.DIM_PROPERTY p 
                 ON r.PROPERTY_SK = p.PROPERTY_SK
             LEFT JOIN DATAEXPERT_STUDENT.JMUSNI07.DIM_ZONING z
                 ON p.ZONING_ID = z.ZONING_ID
+            """
+            
+            # Add join to predicted rent prices if this is a rental listing
+            if "FCT_RENT_LISTING" in table_name:
+                query += """
+                LEFT JOIN DATAEXPERT_STUDENT.JMUSNI07.PREDICTED_RENT_PRICES pred
+                    ON r.LISTING_ID = pred.LISTING_ID
+                """
+            
+            query += f"""
             LIMIT {limit}
             """
         else:
@@ -372,7 +428,6 @@ def load_property_data(table_name, limit=1000):
             query = f"""
             SELECT {col_list}
             FROM DATAEXPERT_STUDENT.JMUSNI07.{table_name} r
-            LIMIT {limit}
             """
         
         # Execute the query safely
@@ -388,7 +443,7 @@ def load_property_data(table_name, limit=1000):
             # Handle numeric columns
             numeric_cols = ['BEDROOMS', 'BATHROOMS', 'YEAR_BUILT', 'DAYS_ON_MARKET', 
                           'PRICE', 'SQUARE_FOOTAGE', 'LOT_SIZE', 'LAST_SALE_PRICE', 
-                          'LATITUDE', 'LONGITUDE']
+                          'LATITUDE', 'LONGITUDE', 'PREDICTED_RENT_PRICE', 'RENT_TO_PRICE_RATIO', 'SALE_PRICE']
             
             for col in numeric_cols:
                 if col in data.columns:
@@ -442,811 +497,796 @@ def format_address(property_data):
 
 # ======= DISPLAY PROPERTY DETAILS ======
 def display_property_details(property_data):
-    """Display detailed information about a selected property with Google search functionality"""
-    if property_data is None:
-        st.warning("No property data available")
+    """Display detailed information about a selected property"""
+    if not property_data:
+        st.warning("No property details available")
         return
-        
-    # Extract key information
-    prop_type = property_data.get('PROPERTY_TYPE', 'Property')
-    address = property_data.get('FORMATTED_ADDRESS', 'Address not available')
-    price = property_data.get('PRICE')
-    price_display = f"${price:,.0f}" if price and not pd.isna(price) else "Price not available"
     
-    # Display property header with type and address
-    st.subheader(f"{prop_type} at {address}")
-    st.markdown(f"### {price_display}")
-    
-    # Create columns for property details
-    col1, col2 = st.columns(2)
-    
-    # First column with basic property information
-    with col1:
-        # Display property specs
-        specs = [
-            ("Bedrooms", property_data.get('BEDROOMS')),
-            ("Bathrooms", property_data.get('BATHROOMS')),
-            ("Square Footage", property_data.get('SQUARE_FOOTAGE')),
-            ("Year Built", property_data.get('YEAR_BUILT')),
-            ("Days on Market", property_data.get('DAYS_ON_MARKET'))
-        ]
+    try:
+        # Create columns for key property information
+        col1, col2 = st.columns(2)
         
-        for label, value in specs:
-            if value is not None and not pd.isna(value):
-                formatted_value = f"{value:,}" if isinstance(value, (int, float)) else value
-                st.markdown(f"**{label}:** {formatted_value}")
-        
-        # Add price per square foot if both price and square footage are available
-        if (price is not None and not pd.isna(price) and 
-            property_data.get('SQUARE_FOOTAGE') is not None and 
-            not pd.isna(property_data.get('SQUARE_FOOTAGE')) and
-            property_data.get('SQUARE_FOOTAGE') > 0):
-            price_per_sqft = price / property_data.get('SQUARE_FOOTAGE')
-            st.markdown(f"**Price per Sq Ft:** ${price_per_sqft:.2f}")
-    
-    # Second column with zoning and location information
-    with col2:
-        # Zoning information
-        zoning_code = property_data.get('ZONING_CODE')
-        zoning_group = property_data.get('ZONING_GROUP')
-        
-        if zoning_code is not None and not pd.isna(zoning_code):
-            st.markdown(f"**Zoning Code:** {zoning_code}")
-        if zoning_group is not None and not pd.isna(zoning_group):
-            st.markdown(f"**Zoning Type:** {zoning_group}")
+        # Basic property information (left column)
+        with col1:
+            address = property_data.get('FORMATTED_ADDRESS', 'No address available')
+            st.markdown(f"### {address}")
             
-        # Additional property details
-        if 'LOT_SIZE' in property_data and not pd.isna(property_data['LOT_SIZE']):
-            st.markdown(f"**Lot Size:** {property_data['LOT_SIZE']:,} sq ft")
-            
-        # Last sale information for sale properties
-        if 'LAST_SALE_PRICE' in property_data and not pd.isna(property_data['LAST_SALE_PRICE']):
-            st.markdown(f"**Last Sale Price:** ${property_data['LAST_SALE_PRICE']:,.0f}")
-        if 'LAST_SALE_DATE' in property_data and not pd.isna(property_data['LAST_SALE_DATE']):
-            st.markdown(f"**Last Sale Date:** {property_data['LAST_SALE_DATE']}")
-    
-    # Add a horizontal rule to separate sections
-    st.markdown("---")
-    
-    # Restore Google search functionality
-    st.subheader("Research This Property")
-    
-    # Create search buttons for different platforms
-    search_col1, search_col2, search_col3 = st.columns(3)
-    
-    # Encode the address for URL
-    encoded_address = urllib.parse.quote(address)
-    
-    # Google Maps search
-    with search_col1:
-        maps_url = f"https://www.google.com/maps/search/?api=1&query={encoded_address}"
-        st.markdown(f"[![Google Maps](https://img.shields.io/badge/Google_Maps-4285F4?style=for-the-badge&logo=google-maps&logoColor=white)]({maps_url})")
-    
-    # Google search
-    with search_col2:
-        google_url = f"https://www.google.com/search?q={encoded_address}"
-        st.markdown(f"[![Google Search](https://img.shields.io/badge/Google_Search-4285F4?style=for-the-badge&logo=google&logoColor=white)]({google_url})")
-    
-    # Zillow search (if it's a residential property)
-    with search_col3:
-        zillow_url = f"https://www.zillow.com/homes/{encoded_address}_rb/"
-        st.markdown(f"[![Zillow](https://img.shields.io/badge/Zillow-006AFF?style=for-the-badge&logo=zillow&logoColor=white)]({zillow_url})")
-    
-    # Add a section for nearby amenities search
-    st.markdown("### Nearby Amenities")
-    amenity_col1, amenity_col2, amenity_col3 = st.columns(3)
-    
-    # Restaurants nearby
-    with amenity_col1:
-        restaurants_url = f"https://www.google.com/maps/search/restaurants+near+{encoded_address}"
-        st.markdown(f"[🍽️ Restaurants]({restaurants_url})")
-    
-    # Schools nearby
-    with amenity_col2:
-        schools_url = f"https://www.google.com/maps/search/schools+near+{encoded_address}"
-        st.markdown(f"[🏫 Schools]({schools_url})")
-    
-    # Parks nearby
-    with amenity_col3:
-        parks_url = f"https://www.google.com/maps/search/parks+near+{encoded_address}"
-        st.markdown(f"[🌳 Parks]({parks_url})")
-    
-    return
-
-# ======= CREATE PROPERTY MAP =======
-def create_property_map(property_data, listing_type, show_zoning=False):
-    """Create a Folium map with price markers and working zoning overlays"""
-    import folium
-    from folium.plugins import MarkerCluster
-    import json
-    import urllib.parse
-    import colorsys
-    
-    # Check if data is available
-    if property_data is None or property_data.empty:
-        # Create a default map centered on San Francisco
-        m = folium.Map(location=[37.7749, -122.4194], zoom_start=12)
-        folium.Marker(
-            [37.7749, -122.4194],
-            popup="No property data available",
-            icon=folium.Icon(color="red", icon="info-sign"),
-        ).add_to(m)
-        return m
-    
-    # Find center of the map based on properties
-    center_lat = property_data['LATITUDE'].mean()
-    center_lon = property_data['LONGITUDE'].mean()
-    
-    # Create base map
-    m = folium.Map(location=[center_lat, center_lon], zoom_start=12)
-    
-    # Add marker cluster
-    marker_cluster = MarkerCluster().add_to(m)
-    
-    # Process zoning data first if requested
-    if show_zoning:
-        try:
-            # Create a zoning layer that will be added to the map
-            zoning_layer = folium.FeatureGroup(name="Zoning Areas", show=True)
-            
-            # Get unique zoning codes
-            if 'ZONING_CODE' in property_data.columns:
-                unique_zones = property_data['ZONING_CODE'].dropna().unique()
-                
-                # Generate color for each zone
-                zone_colors = {}
-                for i, zone in enumerate(unique_zones):
-                    # Generate a color based on the zoning code hash
-                    hue = (hash(str(zone)) % 100) / 100.0
-                    # Create a lighter, pastel-like color
-                    r, g, b = colorsys.hls_to_rgb(hue, 0.7, 0.8)
-                    # Convert to hex color
-                    zone_colors[zone] = f'#{int(r*255):02x}{int(g*255):02x}{int(b*255):02x}'
-                
-                # Process each property that has polygon data
-                zoning_polygons_added = False
-                for _, prop in property_data.iterrows():
-                    if 'POLYGON_GEOJSON' in prop and not pd.isna(prop['POLYGON_GEOJSON']) and prop['POLYGON_GEOJSON']:
-                        try:
-                            # Parse the GeoJSON string
-                            if isinstance(prop['POLYGON_GEOJSON'], str):
-                                # Print for debugging
-                                if prop['POLYGON_GEOJSON'].strip():  # Only try to parse if not empty
-                                    # Clean the GeoJSON string if necessary
-                                    geojson_str = prop['POLYGON_GEOJSON'].strip()
-                                    geojson_data = json.loads(geojson_str)
-                                    
-                                    zone = str(prop.get('ZONING_CODE', 'Unknown'))
-                                    color = zone_colors.get(zone, '#CCCCCC')
-                                    
-                                    # Add the polygon
-                                    folium.GeoJson(
-                                        geojson_data,
-                                        style_function=lambda x, color=color: {
-                                            'fillColor': color,
-                                            'color': 'black',
-                                            'weight': 1,
-                                            'fillOpacity': 0.4
-                                        },
-                                        tooltip=f"Zoning: {zone}"
-                                    ).add_to(zoning_layer)
-                                    zoning_polygons_added = True
-                        except Exception as e:
-                            # Skip this polygon on error but log it
-                            print(f"Error adding zoning polygon: {str(e)}")
-                            continue
-                
-                # Only add the layer if we successfully added polygons
-                if zoning_polygons_added:
-                    zoning_layer.add_to(m)
-                    print("Successfully added zoning layer to map")
+            # Property status
+            status = property_data.get('PROPERTY_STATUS', 'Unknown')
+            if status:
+                if status.lower() == 'active':
+                    st.markdown(f"**Status:** 🟢 {status}")
+                elif status.lower() == 'pending':
+                    st.markdown(f"**Status:** 🟠 {status}")
+                elif status.lower() == 'sold':
+                    st.markdown(f"**Status:** 🔴 {status}")
                 else:
-                    print("No valid zoning polygons found to add to map")
-            else:
-                print("No ZONING_CODE column found in data")
-        except Exception as e:
-            print(f"Error setting up zoning layer: {str(e)}")
-    
-    # Add properties to the map
-    for _, prop in property_data.iterrows():
-        try:
-            # Skip if coordinates are missing
-            if pd.isna(prop['LATITUDE']) or pd.isna(prop['LONGITUDE']):
-                continue
+                    st.markdown(f"**Status:** {status}")
             
-            # Format property information
-            prop_type = prop.get('PROPERTY_TYPE', 'Property')
-            address = prop.get('FORMATTED_ADDRESS', 'Address not available')
-            price = prop.get('PRICE', 0)
+            # Basic property details
+            beds = int(property_data.get('BEDROOMS', 0)) if pd.notna(property_data.get('BEDROOMS')) else 0
+            baths = property_data.get('BATHROOMS', 0)
+            sqft = int(property_data.get('SQUARE_FOOTAGE', 0)) if pd.notna(property_data.get('SQUARE_FOOTAGE')) else 0
             
-            # Format price nicely
-            if pd.isna(price):
-                price_formatted = "N/A"
-                price_short = "N/A"
-            else:
-                price_formatted = f"${price:,.0f}"
-                # Create a short version for the marker (K for thousands, M for millions)
-                if price >= 1000000:
-                    price_short = f"${price/1000000:.1f}M"
-                else:
-                    price_short = f"${price/1000:.0f}K"
+            st.markdown(f"**{beds} bed, {baths} bath, {sqft:,} sq ft**")
             
-            # Create a popup with property details
+            # Property type
+            prop_type = property_data.get('PROPERTY_TYPE', 'Unknown')
+            if prop_type:
+                st.markdown(f"**Type:** {prop_type}")
+            
+            # Year built
+            year_built = int(property_data.get('YEAR_BUILT', 0)) if pd.notna(property_data.get('YEAR_BUILT')) else 'Unknown'
+            if year_built != 'Unknown':
+                st.markdown(f"**Year Built:** {year_built}")
+            
+            # Days on market
+            days = property_data.get('DAYS_ON_MARKET')
+            if days and pd.notna(days):
+                st.markdown(f"**Days on Market:** {int(days)}")
+            
+            # Lot size if available
+            lot_size = property_data.get('LOT_SIZE')
+            if lot_size and pd.notna(lot_size):
+                st.markdown(f"**Lot Size:** {int(lot_size):,} sq ft")
+        
+        # Price information (right column)
+        with col2:
+            price = property_data.get('PRICE', 0)
+            if price and pd.notna(price):
+                st.markdown(f"## ${price:,.0f}")
+                
+                # Calculate price per square foot
+                if sqft > 0:
+                    price_per_sqft = price / sqft
+                    st.markdown(f"**${price_per_sqft:.2f}/sq ft**")
+            
+            # Zoning information if available
+            zoning_code = property_data.get('ZONING_CODE')
+            zoning_group = property_data.get('ZONING_GROUP')
+            
+            if zoning_code and pd.notna(zoning_code):
+                st.markdown("#### Zoning Information")
+                st.markdown(f"**Code:** {zoning_code}")
+                if zoning_group and pd.notna(zoning_group):
+                    st.markdown(f"**Type:** {zoning_group}")
+            
+            # Investment metrics (if available)
+            pred_rent = property_data.get('PREDICTED_RENT_PRICE')
+            if pred_rent and pd.notna(pred_rent):
+                st.markdown("#### Investment Analysis")
+                st.markdown(f"**Est. Monthly Rent:** ${pred_rent:,.0f}")
+                
+                # Calculate ROI
+                rent_to_price = property_data.get('RENT_TO_PRICE_RATIO')
+                if rent_to_price and pd.notna(rent_to_price):
+                    annual_yield = rent_to_price * 12 * 100
+                    st.markdown(f"**Annual Yield:** {annual_yield:.2f}%")
+                    
+                    # Calculate mortgage payment (estimated)
+                    mortgage_payment = (price * 0.8 * (0.05/12) * (1 + 0.05/12)**(30*12)) / ((1 + 0.05/12)**(30*12) - 1)
+                    st.markdown(f"**Est. Mortgage:** ${mortgage_payment:,.0f}/mo")
+                    
+                    # Calculate cash flow
+                    monthly_expenses = price * 0.02 / 12  # Estimate 2% annual for taxes, insurance, maintenance
+                    cash_flow = pred_rent - mortgage_payment - monthly_expenses
+                    
+                    if cash_flow > 0:
+                        st.markdown(f"**Monthly Cash Flow:** 🟢 +${cash_flow:,.0f}")
+                    else:
+                        st.markdown(f"**Monthly Cash Flow:** 🔴 -${-cash_flow:,.0f}")
+        
+        # Create a map showing just this property
+        st.markdown("### Property Location")
+        
+        # Get lat/lon for the property
+        lat = property_data.get('LATITUDE')
+        lon = property_data.get('LONGITUDE')
+        
+        if lat and lon and pd.notna(lat) and pd.notna(lon):
+            # Create a map centered on this property
+            property_map = folium.Map(location=[lat, lon], zoom_start=15, tiles="OpenStreetMap")
+            
+            # Create a marker for this property
             popup_html = f"""
-            <div style="min-width: 200px; max-width: 300px;">
-                <h4>{prop_type}</h4>
-                <h3>{price_formatted}</h3>
-                <p><b>Address:</b> {address}</p>
+            <strong>{address}</strong><br>
+            ${price:,.0f}<br>
+            {beds} bed, {baths} bath, {sqft:,} sq ft
             """
             
-            # Add additional property details if available
-            if 'BEDROOMS' in prop and not pd.isna(prop['BEDROOMS']):
-                popup_html += f"<p><b>Beds:</b> {prop['BEDROOMS']}</p>"
-            if 'BATHROOMS' in prop and not pd.isna(prop['BATHROOMS']):
-                popup_html += f"<p><b>Baths:</b> {prop['BATHROOMS']}</p>"
-            if 'SQUARE_FOOTAGE' in prop and not pd.isna(prop['SQUARE_FOOTAGE']):
-                popup_html += f"<p><b>Sq Ft:</b> {prop['SQUARE_FOOTAGE']:,.0f}</p>"
-            if 'DAYS_ON_MARKET' in prop and not pd.isna(prop['DAYS_ON_MARKET']):
-                popup_html += f"<p><b>Days on Market:</b> {prop['DAYS_ON_MARKET']}</p>"
+            folium.Marker(
+                [lat, lon],
+                popup=popup_html,
+                tooltip=address,
+                icon=folium.Icon(color='red', icon='home', prefix='fa')
+            ).add_to(property_map)
             
-            # Add zoning info to popup if available
-            if 'ZONING_CODE' in prop and not pd.isna(prop['ZONING_CODE']):
-                popup_html += f"<p><b>Zoning:</b> {prop['ZONING_CODE']}</p>"
+            # Display the map
+            folium_static(property_map, width=1000, height=600)
+        else:
+            st.warning("No location data available for this property")
+        
+    except Exception as e:
+        st.error(f"Error displaying property details: {str(e)}")
+
+class Legend(MacroElement):
+    """Custom Legend for Folium maps"""
+    
+    def __init__(self):
+        """Initialize the legend."""
+        super(Legend, self).__init__()
+        self._name = "Legend"
+        self._template = Template("""
+            {% macro script(this, kwargs) %}
+            var legend = L.control({position: 'bottomright'});
+            legend.onAdd = function (map) {
+                var div = L.DomUtil.create('div', 'info legend');
+                div.innerHTML = `
+                <div style="
+                    background-color: white; 
+                    padding: 10px; 
+                    border: 2px solid grey; 
+                    border-radius: 5px;
+                    font-family: Arial, sans-serif;">
+                    <p style="margin: 0; text-align: center;"><strong>Investment Quality</strong></p>
+                    <div style="display: flex; align-items: center; margin: 5px 0;">
+                        <div style="width: 20px; height: 20px; background-color: green; margin-right: 5px;"></div>
+                        <span>Excellent (>10% yield)</span>
+                    </div>
+                    <div style="display: flex; align-items: center; margin: 5px 0;">
+                        <div style="width: 20px; height: 20px; background-color: lightgreen; margin-right: 5px;"></div>
+                        <span>Good (8-10% yield)</span>
+                    </div>
+                    <div style="display: flex; align-items: center; margin: 5px 0;">
+                        <div style="width: 20px; height: 20px; background-color: orange; margin-right: 5px;"></div>
+                        <span>Average (6-8% yield)</span>
+                    </div>
+                    <div style="display: flex; align-items: center; margin: 5px 0;">
+                        <div style="width: 20px; height: 20px; background-color: red; margin-right: 5px;"></div>
+                        <span>Below average (<6% yield)</span>
+                    </div>
+                    <div style="display: flex; align-items: center; margin: 5px 0;">
+                        <div style="width: 20px; height: 20px; background-color: blue; margin-right: 5px;"></div>
+                        <span>Unknown yield</span>
+                    </div>
+                </div>`;
+                return div;
+            };
+            legend.addTo({{ this._parent.get_name() }});
+            {% endmacro %}
+            """)
+
+def create_property_map(property_data, listing_type="sale", show_zoning=False):
+    """Create an interactive map with color-coded price tag markers"""
+    try:
+        if property_data is None or property_data.empty:
+            return folium.Map(location=[47.6062, -122.3321], zoom_start=12)
+        
+        # Drop any rows with missing coordinates
+        valid_data = property_data.dropna(subset=['LATITUDE', 'LONGITUDE'])
+        
+        if valid_data.empty:
+            return folium.Map(location=[47.6062, -122.3321], zoom_start=12)
+        
+        # Calculate map center using median of coordinates
+        map_center = [valid_data['LATITUDE'].median(), valid_data['LONGITUDE'].median()]
+        
+        # Create base map
+        property_map = folium.Map(
+            location=map_center, 
+            zoom_start=12, 
+            control_scale=True
+        )
+        
+        # Create a marker cluster group with optimized settings
+        marker_cluster = MarkerCluster(
+            name="Properties",
+            options={
+                'maxClusterRadius': 60,
+                'disableClusteringAtZoom': 16,
+                'chunkedLoading': True,
+                'chunkDelay': 10
+            }
+        )
+        marker_cluster.add_to(property_map)
+        
+        # Process properties in smaller batches for better performance
+        batch_size = 500
+        total_batches = len(valid_data) // batch_size + (1 if len(valid_data) % batch_size > 0 else 0)
+        
+        for batch_idx in range(total_batches):
+            start_idx = batch_idx * batch_size
+            end_idx = min(start_idx + batch_size, len(valid_data))
+            batch = valid_data.iloc[start_idx:end_idx]
             
-            # Add Google search links
-            encoded_address = urllib.parse.quote(address)
+            for idx, property_row in batch.iterrows():
+                try:
+                    # Skip if missing lat/long
+                    if pd.isna(property_row['LATITUDE']) or pd.isna(property_row['LONGITUDE']):
+                        continue
+                    
+                    # Extract basic property info
+                    price = property_row.get('PRICE', 0)
+                    bedrooms = property_row.get('BEDROOMS', 0)
+                    bathrooms = property_row.get('BATHROOMS', 0)
+                    
+                    # Determine investment quality and color code
+                    bg_color = '#3498db'  # Default blue
+                    
+                    if listing_type == "sale" and 'RENT_TO_PRICE_RATIO' in property_row and pd.notna(property_row['RENT_TO_PRICE_RATIO']):
+                        annual_yield = property_row['RENT_TO_PRICE_RATIO'] * 12 * 100
+                        if annual_yield > 8:
+                            bg_color = '#27ae60'  # Green
+                        elif annual_yield > 6:
+                            bg_color = '#f39c12'  # Orange
+                        else:
+                            bg_color = '#e74c3c'  # Red
+                    
+                    # Format price for shorter display
+                    if price >= 1000000:
+                        price_display = f"${price/1000000:.1f}M"
+                    else:
+                        price_display = f"${price/1000:.0f}K"
+                    
+                    # Create simple price tag with inline styles to ensure it works
+                    icon_html = f"""
+                    <div style="
+                        background-color: {bg_color}; 
+                        color: white; 
+                        padding: 3px 8px; 
+                        border-radius: 4px;
+                        font-weight: bold;
+                        text-align: center;
+                        font-size: 12px;
+                        box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+                        min-width: 50px;
+                        font-family: Arial, sans-serif;">
+                        {price_display}
+                    </div>
+                    """
+                    
+                    # Use DivIcon for the price tag
+                    icon = folium.DivIcon(
+                        icon_size=(70, 20),
+                        icon_anchor=(35, 10),
+                        html=icon_html
+                    )
+                    
+                    # Add marker with all details in popup
+                    folium.Marker(
+                        location=[float(property_row['LATITUDE']), float(property_row['LONGITUDE'])],
+                        icon=icon,
+                        popup=folium.Popup(create_property_popup(property_row, "", listing_type, idx), max_width=300),
+                        tooltip=f"${price:,.0f} - {bedrooms} bed, {bathrooms} bath"
+                    ).add_to(marker_cluster)
+                    
+                except Exception as e:
+                    # Skip any problematic markers
+                    continue
+        
+        # Note: We're not adding the legend to the map here anymore
+        # It will be displayed in the Streamlit UI instead
+        
+        return property_map
+    
+    except Exception as e:
+        st.error(f"Error creating map: {str(e)}")
+        return folium.Map(location=[47.6062, -122.3321], zoom_start=12)
+
+def create_property_popup(property_row, popup_style, listing_type, idx):
+    """Create detailed popup HTML for a property"""
+    try:
+        # Extract property info
+        address = property_row.get('FORMATTED_ADDRESS', 'Address not available')
+        price = property_row.get('PRICE', 0)
+        bedrooms = property_row.get('BEDROOMS', 0)
+        bathrooms = property_row.get('BATHROOMS', 0)
+        sqft = property_row.get('SQUARE_FOOTAGE', 0)
+        
+        # Start popup HTML
+        popup_html = f"""
+        {popup_style}
+        <div class="property-popup">
+            <h3>{address}</h3>
+            <table>
+                <tr>
+                    <td><strong>Price:</strong></td>
+                    <td>${price:,.0f}</td>
+                </tr>
+                <tr>
+                    <td><strong>Beds/Baths:</strong></td>
+                    <td>{bedrooms} bed, {bathrooms} bath</td>
+                </tr>
+        """
+        
+        # Add square footage if available
+        if sqft and pd.notna(sqft):
             popup_html += f"""
-            <div style="margin-top: 10px;">
-                <b>Search:</b><br>
-                <a href="https://www.google.com/maps/search/?api=1&query={encoded_address}" target="_blank">Google Maps</a> | 
-                <a href="https://www.google.com/search?q={encoded_address}" target="_blank">Google</a> | 
+                <tr>
+                    <td><strong>Size:</strong></td>
+                    <td>{sqft:,.0f} sq ft</td>
+                </tr>
+            """
+        
+        # Add property type if available
+        if 'PROPERTY_TYPE' in property_row and pd.notna(property_row['PROPERTY_TYPE']):
+            popup_html += f"""
+                <tr>
+                    <td><strong>Type:</strong></td>
+                    <td>{property_row['PROPERTY_TYPE']}</td>
+                </tr>
+            """
+        
+        # Add year built if available
+        if 'YEAR_BUILT' in property_row and pd.notna(property_row['YEAR_BUILT']):
+            popup_html += f"""
+                <tr>
+                    <td><strong>Year Built:</strong></td>
+                    <td>{int(property_row['YEAR_BUILT'])}</td>
+                </tr>
+            """
+        
+        # Add investment metrics for sale listings
+        if listing_type == "sale" and 'PREDICTED_RENT_PRICE' in property_row and pd.notna(property_row['PREDICTED_RENT_PRICE']):
+            pred_rent = property_row['PREDICTED_RENT_PRICE']
+            popup_html += f"""
+                <tr>
+                    <td><strong>Est. Rent:</strong></td>
+                    <td>${pred_rent:,.0f}/mo</td>
+                </tr>
+            """
+            
+            if 'RENT_TO_PRICE_RATIO' in property_row and pd.notna(property_row['RENT_TO_PRICE_RATIO']):
+                annual_yield = property_row['RENT_TO_PRICE_RATIO'] * 12 * 100
+                yield_color = "#27ae60" if annual_yield > 8 else ("#f39c12" if annual_yield > 6 else "#e74c3c")
+                popup_html += f"""
+                    <tr>
+                        <td><strong>Annual Yield:</strong></td>
+                        <td><span style="color:{yield_color}; font-weight:bold;">{annual_yield:.2f}%</span></td>
+                    </tr>
+                """
+        
+        # Close the table and add links
+        encoded_address = urllib.parse.quote(address)
+        popup_html += f"""
+            </table>
+            <div class="links">
+                <a href="?property_id={idx}" target="_self"><strong>View Details</strong></a> | 
+                <a href="https://www.google.com/maps/search/?api=1&query={encoded_address}" target="_blank">Maps</a> | 
                 <a href="https://www.zillow.com/homes/{encoded_address}_rb/" target="_blank">Zillow</a>
             </div>
-            """
-            
-            # Add View Details button
-            if 'LISTING_ID' in prop:
-                listing_id = prop['LISTING_ID']
-                popup_html += f"""
-                <div style="margin-top: 10px; text-align: center;">
-                    <a href="#" onclick="parent.postMessage({{action: 'selectProperty', listingId: '{listing_id}'}}, '*'); return false;" 
-                    style="display: inline-block; padding: 5px 15px; background-color: #4285F4; color: white; text-decoration: none; border-radius: 3px;">
-                    View Full Details</a>
-                </div>
-                """
-            
-            popup_html += "</div>"
-            
-            # Determine marker color based on listing type
-            bg_color = "#4CAF50" if listing_type == "sale" else "#2196F3"  # Green for sales, Blue for rentals
-            
-            # Create custom HTML for the price marker
-            price_marker_html = f"""
-                <div style="
-                    background-color: {bg_color}; 
-                    color: white; 
-                    font-weight: bold; 
-                    padding: 3px 8px; 
-                    border-radius: 10px; 
-                    font-size: 12px; 
-                    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
-                    white-space: nowrap;
-                    text-align: center;
-                ">
-                    {price_short}
-                </div>
-            """
-            
-            # Add marker to cluster with custom price icon
-            folium.Marker(
-                [prop['LATITUDE'], prop['LONGITUDE']],
-                popup=folium.Popup(popup_html, max_width=300),
-                tooltip=f"{prop_type}: {price_formatted}",
-                icon=folium.DivIcon(
-                    html=price_marker_html,
-                    icon_size=(100, 20),  # Adjust size as needed
-                    icon_anchor=(50, 10)  # Center of the icon
-                )
-            ).add_to(marker_cluster)
-            
-        except Exception as e:
-            # Skip this property on error
-            continue
+        </div>
+        """
+        
+        return popup_html
     
-    # Add layer control to toggle layers
-    folium.LayerControl().add_to(m)
-    
-    # Add a diagnostic message about zoning on the map
-    if show_zoning:
-        folium.Marker(
-            [center_lat, center_lon],
-            popup="Zoning data should be visible. Toggle layers using the control in the top-right corner.",
-            icon=folium.Icon(color="purple", icon="info-sign")
-        ).add_to(m)
-    
-    return m
+    except Exception as e:
+        # Return a simple popup on error
+        return f"<div>Property at {property_row.get('FORMATTED_ADDRESS', 'Unknown')}</div>"
 
-# ======= PROPERTY ANALYTICS FUNCTIONS =======
-def calculate_market_stats(property_data):
-    """Calculate key market statistics from property data"""
-    if property_data.empty:
-        return None
+def apply_filters(property_data):
+    """Apply user-selected filters to the property data"""
+    if property_data is None or property_data.empty:
+        return property_data
     
-    stats = {}
+    filtered_data = property_data.copy()
     
-    # Price statistics
-    if 'PRICE' in property_data.columns:
-        price_data = property_data['PRICE'].dropna()
-        if not price_data.empty:
-            stats['median_price'] = price_data.median()
-            stats['avg_price'] = price_data.mean()
-            stats['min_price'] = price_data.min()
-            stats['max_price'] = price_data.max()
-            stats['price_std'] = price_data.std()
+    # Price filter
+    min_price = st.sidebar.slider(
+        "Min Price", 
+        min_value=float(filtered_data['PRICE'].min()),
+        max_value=float(filtered_data['PRICE'].max()),
+        value=float(filtered_data['PRICE'].min()),
+        step=50000.0
+    )
     
-    # Price per square foot
-    if 'PRICE' in property_data.columns and 'SQUARE_FOOTAGE' in property_data.columns:
-        # Calculate price per square foot for each property
-        property_data['PRICE_PER_SQFT'] = property_data.apply(
-            lambda row: row['PRICE'] / row['SQUARE_FOOTAGE'] if pd.notna(row['PRICE']) and pd.notna(row['SQUARE_FOOTAGE']) and row['SQUARE_FOOTAGE'] > 0 else None, 
-            axis=1
+    max_price = st.sidebar.slider(
+        "Max Price", 
+        min_value=float(filtered_data['PRICE'].min()),
+        max_value=float(filtered_data['PRICE'].max()),
+        value=float(filtered_data['PRICE'].max()),
+        step=50000.0
+    )
+    
+    filtered_data = filtered_data[(filtered_data['PRICE'] >= min_price) & 
+                                 (filtered_data['PRICE'] <= max_price)]
+    
+    # Bedrooms filter
+    if 'BEDROOMS' in filtered_data.columns:
+        # Filter out None values before sorting
+        valid_bedrooms = [b for b in filtered_data['BEDROOMS'].unique() if pd.notna(b)]
+        bedrooms = st.sidebar.multiselect(
+            "Bedrooms",
+            options=sorted(valid_bedrooms),
+            default=None
         )
-        ppsf_data = property_data['PRICE_PER_SQFT'].dropna()
-        if not ppsf_data.empty:
-            stats['median_price_per_sqft'] = ppsf_data.median()
-            stats['avg_price_per_sqft'] = ppsf_data.mean()
+        
+        if bedrooms:
+            filtered_data = filtered_data[filtered_data['BEDROOMS'].isin(bedrooms)]
     
-    # Bedrooms breakdown
-    if 'BEDROOMS' in property_data.columns:
-        beds_data = property_data['BEDROOMS'].dropna()
-        if not beds_data.empty:
-            stats['avg_beds'] = beds_data.mean()
-            stats['beds_counts'] = beds_data.value_counts().sort_index().to_dict()
+    # Bathrooms filter
+    if 'BATHROOMS' in filtered_data.columns:
+        # Filter out None values before sorting
+        valid_bathrooms = [b for b in filtered_data['BATHROOMS'].unique() if pd.notna(b)]
+        
+        bathrooms = st.sidebar.multiselect(
+            "Bathrooms",
+            options=sorted(valid_bathrooms),
+            default=None
+        )
+        
+        if bathrooms:
+            filtered_data = filtered_data[filtered_data['BATHROOMS'].isin(bathrooms)]
     
-    # Days on market
-    if 'DAYS_ON_MARKET' in property_data.columns:
-        dom_data = property_data['DAYS_ON_MARKET'].dropna()
-        if not dom_data.empty:
-            stats['avg_days_on_market'] = dom_data.mean()
-            stats['median_days_on_market'] = dom_data.median()
+    # Property type filter
+    if 'PROPERTY_TYPE' in filtered_data.columns:
+        # Filter out None values before sorting
+        valid_property_types = [pt for pt in filtered_data['PROPERTY_TYPE'].unique() if pd.notna(pt)]
+        
+        property_types = st.sidebar.multiselect(
+            "Property Type",
+            options=sorted(valid_property_types),
+            default=None
+        )
+        
+        if property_types:
+            filtered_data = filtered_data[filtered_data['PROPERTY_TYPE'].isin(property_types)]
     
-    # Zoning breakdown
-    if 'ZONING_CODE' in property_data.columns:
-        zoning_data = property_data['ZONING_CODE'].dropna()
-        if not zoning_data.empty:
-            stats['zoning_counts'] = zoning_data.value_counts().to_dict()
+    # Add investment filters only for sale properties
+    if 'RENT_TO_PRICE_RATIO' in filtered_data.columns and st.session_state.listing_type == "sale":
+        st.sidebar.markdown("### Investment Filters")
+        
+        # Calculate annual yield percentage for all properties
+        filtered_data['ANNUAL_YIELD'] = filtered_data['RENT_TO_PRICE_RATIO'] * 12 * 100
+        
+        # Get min and max yield values (handling NaN values)
+        non_na_yields = filtered_data['ANNUAL_YIELD'].dropna()
+        if not non_na_yields.empty:
+            min_yield = non_na_yields.min()
+            max_yield = non_na_yields.max()
+        else:
+            min_yield = 0
+            max_yield = 15
+        
+        # Add yield filter slider
+        min_yield_filter = st.sidebar.slider(
+            "Min Annual Yield (%)", 
+            min_value=float(min_yield),
+            max_value=float(max_yield),
+            value=float(min_yield),
+            step=0.5
+        )
+        
+        # Apply investment filter
+        filtered_data = filtered_data[
+            (filtered_data['ANNUAL_YIELD'] >= min_yield_filter) | 
+            (filtered_data['ANNUAL_YIELD'].isna())
+        ]
+        
+        # Investment quality categories
+        investment_quality = st.sidebar.multiselect(
+            "Investment Quality",
+            options=["Excellent (>10%)", "Good (8-10%)", "Average (6-8%)", "Below Average (<6%)"],
+            default=None
+        )
+        
+        if investment_quality:
+            quality_mask = pd.Series(False, index=filtered_data.index)
+            
+            for quality in investment_quality:
+                if "Excellent" in quality:
+                    quality_mask = quality_mask | (filtered_data['ANNUAL_YIELD'] > 10)
+                elif "Good" in quality:
+                    quality_mask = quality_mask | ((filtered_data['ANNUAL_YIELD'] > 8) & (filtered_data['ANNUAL_YIELD'] <= 10))
+                elif "Average" in quality:
+                    quality_mask = quality_mask | ((filtered_data['ANNUAL_YIELD'] > 6) & (filtered_data['ANNUAL_YIELD'] <= 8))
+                elif "Below Average" in quality:
+                    quality_mask = quality_mask | (filtered_data['ANNUAL_YIELD'] <= 6)
+            
+            # Apply the quality mask, but also keep properties without yield data
+            filtered_data = filtered_data[quality_mask | filtered_data['ANNUAL_YIELD'].isna()]
     
-    # Property type breakdown
-    if 'PROPERTY_TYPE' in property_data.columns:
-        type_data = property_data['PROPERTY_TYPE'].dropna()
-        if not type_data.empty:
-            stats['property_type_counts'] = type_data.value_counts().to_dict()
-    
-    return stats
+    return filtered_data
 
-def display_property_analytics(property_data, listing_type="sale"):
-    """Display property analytics in the right sidebar"""
-    if property_data.empty:
-        st.sidebar.warning("No data available for analytics")
+def display_sale_rent_prediction_metrics(property_data):
+    """Display rent prediction metrics for sale properties"""
+    if property_data is None or property_data.empty:
         return
     
-    # Calculate market statistics
-    stats = calculate_market_stats(property_data)
-    if not stats:
-        st.sidebar.warning("Insufficient data for analytics")
+    # Check if prediction columns exist in the data
+    has_predictions = 'PREDICTED_RENT_PRICE' in property_data.columns
+    
+    if not has_predictions or property_data['PREDICTED_RENT_PRICE'].isna().all():
+        return
+    
+    # Create a container for the predictions
+    st.subheader("💼 Investment Opportunity Analysis")
+    
+    # Create metrics row
+    col1, col2, col3 = st.columns(3)
+    
+    # Calculate metrics
+    avg_predicted_rent = property_data['PREDICTED_RENT_PRICE'].mean()
+    
+    if 'RENT_TO_PRICE_RATIO' in property_data.columns:
+        avg_rent_to_price = property_data['RENT_TO_PRICE_RATIO'].mean() * 100 * 12  # Annual percentage
+        col1.metric("Avg. Predicted Rent", f"${avg_predicted_rent:,.2f}/mo")
+        col2.metric("Avg. Annual Yield", f"{avg_rent_to_price:.2f}%")
+        
+        # Calculate breakeven time (years to recoup purchase price from rent)
+        breakeven_years = 100 / avg_rent_to_price if avg_rent_to_price > 0 else float('inf')
+        col3.metric("Breakeven Time", f"{breakeven_years:.1f} years")
+    else:
+        col1.metric("Avg. Predicted Rent", f"${avg_predicted_rent:,.2f}/mo")
+    
+    # Display top investment opportunities
+    if len(property_data) > 5 and 'RENT_TO_PRICE_RATIO' in property_data.columns:
+        st.markdown("### Top Investment Opportunities")
+        
+        # Get top 5 properties by rent-to-price ratio
+        top_investments = property_data.sort_values('RENT_TO_PRICE_RATIO', ascending=False).head(5)
+        
+        # Create a table of top investments
+        investment_table = pd.DataFrame({
+            'Address': top_investments['FORMATTED_ADDRESS'],
+            'Price': top_investments['PRICE'].apply(lambda x: f"${x:,.0f}" if pd.notna(x) else "N/A"),
+            'Predicted Rent': top_investments['PREDICTED_RENT_PRICE'].apply(lambda x: f"${x:,.0f}/mo" if pd.notna(x) else "N/A"),
+            'Annual Yield': top_investments['RENT_TO_PRICE_RATIO'].apply(lambda x: f"{x*100*12:.2f}%" if pd.notna(x) else "N/A")
+        })
+        
+        st.dataframe(investment_table, use_container_width=True)
+        
+        # Create a scatter plot of price vs predicted rent
+        st.markdown("### Price vs. Predicted Rent")
+        
+        fig = px.scatter(
+            property_data.dropna(subset=['PREDICTED_RENT_PRICE', 'PRICE']), 
+            x='PRICE', 
+            y='PREDICTED_RENT_PRICE',
+            color='RENT_TO_PRICE_RATIO',
+            color_continuous_scale='Viridis',
+            hover_name='FORMATTED_ADDRESS',
+            labels={
+                'PRICE': 'Purchase Price ($)',
+                'PREDICTED_RENT_PRICE': 'Predicted Monthly Rent ($)',
+                'RENT_TO_PRICE_RATIO': 'Rent-to-Price Ratio'
+            },
+            title='Relationship Between Purchase Price and Rental Potential'
+        )
+        
+        fig.update_layout(
+            height=500,
+            coloraxis_colorbar_title='Rent-to-Price Ratio'
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+
+def display_property_statistics_main(property_data, listing_type="sale"):
+    """Display comprehensive property statistics for the dataset"""
+    if property_data is None or property_data.empty:
+        st.warning("No data available for statistics")
         return
     
     # Set title based on listing type
-    title = "Market Analytics: For Sale" if listing_type == "sale" else "Market Analytics: For Rent"
-    st.sidebar.title(title)
+    market_type = "Rental Market" if listing_type == "rent" else "Sales Market"
+    st.subheader(f"{market_type} Overview")
     
-    # Show total properties count
-    st.sidebar.metric("Total Listings", len(property_data))
+    # Create statistics tabs
+    stats_tabs = st.tabs(["Price Stats", "Property", "Market"])
     
-    # Price summary section
-    st.sidebar.subheader("Price Summary")
-    
-    # Format price labels based on listing type
-    price_label = "Price" if listing_type == "sale" else "Monthly Rent"
-    
-    # Create 3-column layout for price metrics
-    col1, col2, col3 = st.sidebar.columns(3)
-    
-    if 'median_price' in stats:
-        col1.metric(f"Median {price_label}", f"${stats['median_price']:,.0f}")
-    if 'min_price' in stats:
-        col2.metric(f"Min {price_label}", f"${stats['min_price']:,.0f}")
-    if 'max_price' in stats:
-        col3.metric(f"Max {price_label}", f"${stats['max_price']:,.0f}")
-    
-    # Price per square foot
-    if 'median_price_per_sqft' in stats:
-        st.sidebar.metric("Median Price/SqFt", f"${stats['median_price_per_sqft']:.2f}")
-    
-    # Days on market
-    if 'median_days_on_market' in stats:
-        st.sidebar.metric("Median Days on Market", f"{stats['median_days_on_market']:.0f} days")
-    
-    # Create a price distribution chart
-    if 'PRICE' in property_data.columns and not property_data['PRICE'].dropna().empty:
-        st.sidebar.subheader("Price Distribution")
+    # --------- PRICE STATISTICS TAB ---------
+    with stats_tabs[0]:
+        cols = st.columns(2)
         
-        # Create bins for price histogram
-        price_data = property_data['PRICE'].dropna()
-        fig = px.histogram(
-            price_data, 
-            nbins=10,
-            labels={'value': price_label, 'count': 'Number of Listings'},
-            title=f"{price_label} Distribution"
-        )
-        fig.update_layout(
-            showlegend=False,
-            margin=dict(l=10, r=10, t=30, b=10),
-            height=200
-        )
-        st.sidebar.plotly_chart(fig, use_container_width=True)
-    
-    # Property characteristics breakdown
-    st.sidebar.subheader("Property Breakdown")
-    
-    # Show property types in a horizontal bar chart
-    if 'property_type_counts' in stats:
-        # Convert to DataFrame for Plotly
-        type_df = pd.DataFrame({
-            'Type': list(stats['property_type_counts'].keys()),
-            'Count': list(stats['property_type_counts'].values())
-        }).sort_values('Count', ascending=False)
+        # Price column name depends on listing type
+        price_col = 'PRICE'
+        price_label = "Sale Price" if listing_type == "sale" else "Monthly Rent"
         
-        if len(type_df) > 0:
-            fig = px.bar(
-                type_df, 
-                x='Count', 
-                y='Type',
-                orientation='h',
-                title='Property Types'
-            )
-            fig.update_layout(
-                showlegend=False,
-                margin=dict(l=10, r=10, t=30, b=10),
-                height=200
-            )
-            st.sidebar.plotly_chart(fig, use_container_width=True)
-    
-    # Bedroom distribution in a pie chart
-    if 'beds_counts' in stats:
-        # Convert to DataFrame for Plotly
-        beds_df = pd.DataFrame({
-            'Bedrooms': list(stats['beds_counts'].keys()),
-            'Count': list(stats['beds_counts'].values())
-        })
-        
-        if len(beds_df) > 0:
-            fig = px.pie(
-                beds_df, 
-                values='Count', 
-                names='Bedrooms',
-                title='Bedroom Distribution'
-            )
-            fig.update_layout(
-                margin=dict(l=10, r=10, t=30, b=10),
-                height=200
-            )
-            st.sidebar.plotly_chart(fig, use_container_width=True)
-    
-    # Zoning breakdown
-    if 'zoning_counts' in stats and len(stats['zoning_counts']) > 0:
-        st.sidebar.subheader("Zoning Analysis")
-        
-        # Convert to DataFrame for Plotly
-        zoning_df = pd.DataFrame({
-            'Zoning': list(stats['zoning_counts'].keys()),
-            'Count': list(stats['zoning_counts'].values())
-        }).sort_values('Count', ascending=False)
-        
-        # Limit to top 5 for clarity
-        if len(zoning_df) > 5:
-            zoning_df = zoning_df.head(5)
-        
-        fig = px.bar(
-            zoning_df, 
-            x='Zoning', 
-            y='Count',
-            title='Top Zoning Types'
-        )
-        fig.update_layout(
-            xaxis_title='',
-            showlegend=False,
-            margin=dict(l=10, r=10, t=30, b=10),
-            height=200
-        )
-        st.sidebar.plotly_chart(fig, use_container_width=True)
-    
-    # Show selected property details when a property is clicked
-    st.sidebar.subheader("Selected Property")
-    if 'selected_property' in st.session_state and st.session_state.selected_property is not None:
-        prop = st.session_state.selected_property
-        
-        # Create an expander for the property details
-        with st.sidebar.expander("Property Details", expanded=True):
-            # Price
-            if 'PRICE' in prop and pd.notna(prop['PRICE']):
-                st.markdown(f"### ${prop['PRICE']:,.0f}")
+        # Calculate price statistics
+        if price_col in property_data.columns:
+            price_data = property_data[price_col].dropna()
             
-            # Address
-            address_parts = []
-            for field in ['ADDRESS_LINE_1', 'CITY', 'STATE', 'ZIP_CODE']:
-                if field in prop and pd.notna(prop[field]):
-                    address_parts.append(str(prop[field]))
-            
-            if address_parts:
-                st.markdown("#### " + ", ".join(address_parts))
-            
-            # Property characteristics
-            details = []
-            if 'BEDROOMS' in prop and pd.notna(prop['BEDROOMS']):
-                details = safe_append(details, f"{int(prop['BEDROOMS'])} beds")
-            if 'BATHROOMS' in prop and pd.notna(prop['BATHROOMS']):
-                bath_val = prop['BATHROOMS']
-                if bath_val == int(bath_val):
-                    details = safe_append(details, f"{int(bath_val)} baths")
+            if not price_data.empty:
+                median_price = price_data.median()
+                avg_price = price_data.mean()
+                min_price = price_data.min()
+                max_price = price_data.max()
+                
+                # Display price statistics
+                with cols[0]:
+                    st.metric("Median", f"${median_price:,.0f}")
+                    st.caption(f"Range: ${min_price:,.0f} - ${max_price:,.0f}")
+                
+                with cols[1]:
+                    st.metric("Average", f"${avg_price:,.0f}")
+                
+                # Create a price histogram
+                st.markdown("##### Price Distribution")
+                
+                # Create histogram bins
+                num_bins = min(20, len(price_data) // 5) if len(price_data) > 10 else 5
+                
+                fig = px.histogram(
+                    property_data,
+                    x=price_col,
+                    nbins=num_bins,
+                    labels={price_col: price_label, 'count': 'Number of Properties'},
+                    title=f'Distribution of {price_label}s'
+                )
+                
+                fig.update_layout(height=250)
+                st.plotly_chart(fig, use_container_width=True)
+    
+    # --------- PROPERTY CHARACTERISTICS TAB ---------
+    with stats_tabs[1]:
+        property_cols = st.columns(2)
+        
+        # Bedroom statistics
+        with property_cols[0]:
+            if 'BEDROOMS' in property_data.columns:
+                beds_data = property_data['BEDROOMS'].dropna()
+                
+                if not beds_data.empty:
+                    avg_beds = beds_data.mean()
+                    st.metric("Avg. Beds", f"{avg_beds:.1f}")
+                    
+                    # Bedroom distribution summary
+                    bed_counts = beds_data.value_counts().sort_index()
+                    bed_summary = " | ".join([f"{b}br: {c}" for b, c in bed_counts.items()])
+                    st.caption(bed_summary)
+        
+        # Property type distribution
+        with property_cols[1]:
+            if 'PROPERTY_TYPE' in property_data.columns:
+                type_data = property_data['PROPERTY_TYPE'].dropna()
+                
+                if not type_data.empty:
+                    # Get the most common type
+                    top_type = type_data.value_counts().index[0]
+                    top_pct = type_data.value_counts(normalize=True).iloc[0] * 100
+                    
+                    st.metric("Top Type", f'"{top_type}"')
+                    st.caption(f"{top_pct:.0f}%")
+        
+        # Show property type pie chart
+        if 'PROPERTY_TYPE' in property_data.columns:
+            type_counts = property_data['PROPERTY_TYPE'].value_counts()
+            if len(type_counts) > 0:
+                st.markdown("##### Property Types")
+                
+                # Limit to top 5 types plus "Other" for cleaner display
+                if len(type_counts) > 5:
+                    top_types = type_counts.head(5)
+                    other_count = type_counts[5:].sum()
+                    
+                    # Create a new series with top 5 + Other
+                    plot_types = pd.Series({**top_types.to_dict(), 'Other': other_count})
                 else:
-                    details = safe_append(details, f"{bath_val} baths")
-            if 'SQUARE_FOOTAGE' in prop and pd.notna(prop['SQUARE_FOOTAGE']):
-                details = safe_append(details, f"{int(prop['SQUARE_FOOTAGE']):,} sq ft")
+                    plot_types = type_counts
+                
+                fig = px.pie(
+                    values=plot_types.values,
+                    names=plot_types.index,
+                    title='Property Types',
+                    hole=0.4
+                )
+                
+                fig.update_layout(height=300)
+                st.plotly_chart(fig, use_container_width=True)
+    
+    # --------- MARKET METRICS TAB ---------
+    with stats_tabs[2]:
+        market_cols = st.columns(2)
+        
+        # Price per sq ft
+        with market_cols[0]:
+            if 'PRICE' in property_data.columns and 'SQUARE_FOOTAGE' in property_data.columns:
+                # Calculate price per square foot
+                property_data['PRICE_PER_SQFT'] = property_data['PRICE'] / property_data['SQUARE_FOOTAGE']
+                price_sqft_data = property_data['PRICE_PER_SQFT'].dropna()
+                
+                if not price_sqft_data.empty:
+                    avg_price_sqft = price_sqft_data.median()  # Use median to avoid outliers
+                    st.metric("Price/SqFt", f"${avg_price_sqft:.2f}")
+        
+        # Days on market
+        with market_cols[1]:
+            if 'DAYS_ON_MARKET' in property_data.columns:
+                dom_data = property_data['DAYS_ON_MARKET'].dropna()
+                
+                if not dom_data.empty:
+                    avg_dom = dom_data.mean()
+                    st.metric("Days on Mkt", f"{avg_dom:.0f}")
+        
+        # Days on market histogram
+        if 'DAYS_ON_MARKET' in property_data.columns:
+            dom_data = property_data['DAYS_ON_MARKET'].dropna()
             
-            if details:
-                st.markdown("**" + " | ".join(details) + "**")
-            
-            # Property type
-            if 'PROPERTY_TYPE' in prop and pd.notna(prop['PROPERTY_TYPE']):
-                st.markdown(f"**Type:** {prop['PROPERTY_TYPE']}")
-            
-            # Year built
-            if 'YEAR_BUILT' in prop and pd.notna(prop['YEAR_BUILT']):
-                st.markdown(f"**Year Built:** {int(prop['YEAR_BUILT'])}")
-            
-            # Days on market
-            if 'DAYS_ON_MARKET' in prop and pd.notna(prop['DAYS_ON_MARKET']):
-                st.markdown(f"**Days on Market:** {int(prop['DAYS_ON_MARKET'])}")
-            
-            # Zoning
-            if 'ZONING_CODE' in prop and pd.notna(prop['ZONING_CODE']):
-                zoning_group = prop['ZONING_GROUP'] if 'ZONING_GROUP' in prop and pd.notna(prop['ZONING_GROUP']) else "Unknown"
-                st.markdown(f"**Zoning:** {prop['ZONING_CODE']} ({zoning_group})")
-            
-            # Last sale info
-            if 'LAST_SALE_PRICE' in prop and pd.notna(prop['LAST_SALE_PRICE']) and 'LAST_SALE_DATE' in prop and pd.notna(prop['LAST_SALE_DATE']):
-                st.markdown(f"**Last Sale:** ${int(prop['LAST_SALE_PRICE']):,} on {prop['LAST_SALE_DATE']}")
-            
-            # Calculate relative metrics (comparison to average)
-            if 'PRICE' in prop and pd.notna(prop['PRICE']) and 'avg_price' in stats:
-                price_diff_pct = (prop['PRICE'] - stats['avg_price']) / stats['avg_price'] * 100
-                st.markdown(f"**Price vs. Average:** {price_diff_pct:.1f}%")
-            
-            if 'SQUARE_FOOTAGE' in prop and pd.notna(prop['SQUARE_FOOTAGE']) and prop['SQUARE_FOOTAGE'] > 0 and 'PRICE' in prop and pd.notna(prop['PRICE']):
-                price_per_sqft = prop['PRICE'] / prop['SQUARE_FOOTAGE']
-                if 'avg_price_per_sqft' in stats:
-                    ppsf_diff_pct = (price_per_sqft - stats['avg_price_per_sqft']) / stats['avg_price_per_sqft'] * 100
-                    st.markdown(f"**${price_per_sqft:.2f}/sq ft** ({ppsf_diff_pct:.1f}% vs avg)")
-    else:
-        st.sidebar.info("Click on a property marker to see details")
+            if len(dom_data) > 5:
+                st.markdown("##### Days on Market")
+                
+                # Limit to 90 days for better visualization
+                dom_data = dom_data[dom_data <= 90]
+                
+                fig = px.histogram(
+                    dom_data,
+                    nbins=min(20, len(dom_data) // 5),
+                    labels={'value': 'Days on Market', 'count': 'Number of Properties'},
+                    title='Days on Market Distribution (up to 90 days)'
+                )
+                
+                fig.update_layout(height=250)
+                st.plotly_chart(fig, use_container_width=True)
 
-def display_property_statistics_main(property_data, listing_type="sale", container=None):
-    """Display property statistics with a completely flat layout to avoid nested columns"""
-    # Use the provided container or st directly
-    display = container if container else st
+def display_investment_heatmap_legend():
+    """Display the investment heat map legend in the Streamlit UI"""
+    st.sidebar.markdown("## Investment Heat Map")
+    st.sidebar.markdown("Color indicates investment quality based on annual rental yield:")
     
-    if property_data is None or property_data.empty:
-        display.warning("No data available for statistics")
-        return
-    
-    # Custom CSS for basic styling only
-    display.markdown("""
+    # Create a consistent style for the legend items
+    legend_style = """
     <style>
-    .small-font {
-        font-size: 0.9rem !important;
-        margin-bottom: 0.2rem !important;
+    .legend-item {
+        display: flex;
+        align-items: center;
+        margin-bottom: 10px;
     }
-    .section-header {
-        font-size: 1.1rem !important;
-        font-weight: bold !important;
-        margin-bottom: 0.3rem !important;
+    .color-box {
+        width: 20px;
+        height: 20px;
+        margin-right: 10px;
+        border-radius: 3px;
+    }
+    .legend-text {
+        font-size: 14px;
     }
     </style>
-    """, unsafe_allow_html=True)
+    """
     
-    # Set title based on listing type with more compact styling
-    title_text = "Sales Market Overview" if listing_type == "sale" else "Rental Market Overview"
-    display.markdown(f"## {title_text}")
+    st.sidebar.markdown(legend_style, unsafe_allow_html=True)
     
-    # Show total properties count
-    display.markdown(f"**Showing {len(property_data)} properties**")
+    # Create legend items
+    legend_html = """
+    <div class="legend-item">
+        <div class="color-box" style="background-color: #27ae60;"></div>
+        <div class="legend-text"><strong>Excellent</strong> (>8% yield)</div>
+    </div>
+    <div class="legend-item">
+        <div class="color-box" style="background-color: #f39c12;"></div>
+        <div class="legend-text"><strong>Good</strong> (6-8% yield)</div>
+    </div>
+    <div class="legend-item">
+        <div class="color-box" style="background-color: #e74c3c;"></div>
+        <div class="legend-text"><strong>Below Average</strong> (<6% yield)</div>
+    </div>
+    <div class="legend-item">
+        <div class="color-box" style="background-color: #3498db;"></div>
+        <div class="legend-text"><strong>Not Evaluated</strong></div>
+    </div>
+    """
     
-    # --- MAIN STATISTICS ---
-    # Create a 6-column grid for all metrics at once (no nesting)
-    all_cols = display.columns(6)
-    
-    # --- PRICE STATISTICS ---
-    all_cols[0].markdown("<p class='section-header'>Price Stats</p>", unsafe_allow_html=True)
-    
-    if 'PRICE' in property_data.columns:
-        price_data = property_data['PRICE'].dropna()
-        if not price_data.empty:
-            median_price = price_data.median()
-            mean_price = price_data.mean()
-            min_price = price_data.min()
-            max_price = price_data.max()
-            
-            # Format price values
-            median_price_fmt = f"${median_price:,.0f}"
-            mean_price_fmt = f"${mean_price:,.0f}"
-            price_range_fmt = f"${min_price:,.0f} - ${max_price:,.0f}"
-            
-            # Use separate columns from our 6-column grid
-            all_cols[0].metric("Median", median_price_fmt)
-            all_cols[1].metric("Average", mean_price_fmt)
-            all_cols[0].caption(f"Range: {price_range_fmt}")
-    
-    # --- PROPERTY CHARACTERISTICS ---
-    all_cols[2].markdown("<p class='section-header'>Property</p>", unsafe_allow_html=True)
-    
-    # Bedrooms distribution
-    if 'BEDROOMS' in property_data.columns:
-        avg_beds = property_data['BEDROOMS'].mean()
-        all_cols[2].metric("Avg. Beds", f"{avg_beds:.1f}")
-        
-        bed_counts = property_data['BEDROOMS'].value_counts().sort_index()
-        if not bed_counts.empty:
-            bed_summary = " | ".join([f"{int(beds)}br: {count}" for beds, count in bed_counts.items()])
-            all_cols[2].caption(bed_summary)
-    
-    # Property types
-    if 'PROPERTY_TYPE' in property_data.columns:
-        type_counts = property_data['PROPERTY_TYPE'].value_counts()
-        if len(type_counts) > 0:
-            top_type = type_counts.index[0]
-            top_type_pct = 100 * type_counts.iloc[0] / len(property_data)
-            all_cols[3].metric("Top Type", f"{top_type}")
-            all_cols[3].caption(f"{top_type_pct:.0f}%")
-    
-    # --- MARKET METRICS ---
-    all_cols[4].markdown("<p class='section-header'>Market</p>", unsafe_allow_html=True)
-    
-    # Price per square foot
-    if 'PRICE' in property_data.columns and 'SQUARE_FOOTAGE' in property_data.columns:
-        # Calculate price per square foot
-        property_data['PRICE_PER_SQFT'] = property_data.apply(
-            lambda row: row['PRICE'] / row['SQUARE_FOOTAGE'] 
-            if pd.notna(row['PRICE']) and pd.notna(row['SQUARE_FOOTAGE']) and row['SQUARE_FOOTAGE'] > 0 
-            else None,
-            axis=1
-        )
-        
-        price_sqft = property_data['PRICE_PER_SQFT'].dropna()
-        if not price_sqft.empty:
-            median_ppsf = price_sqft.median()
-            # Use a separate column
-            all_cols[4].metric("Price/SqFt", f"${median_ppsf:.2f}")
-    
-    # Days on market
-    if 'DAYS_ON_MARKET' in property_data.columns:
-        dom = property_data['DAYS_ON_MARKET'].dropna()
-        if not dom.empty:
-            median_dom = dom.median()
-            # Use a separate column
-            all_cols[5].metric("Days on Mkt", f"{median_dom:.0f}")
-    
-    # --- SECOND ROW ---
-    # Create another row of columns for additional stats
-    display.markdown("---") # Add a separator
-    row2_cols = display.columns(4)
-    
-    # Year built
-    if 'YEAR_BUILT' in property_data.columns:
-        year_built = property_data['YEAR_BUILT'].dropna()
-        if not year_built.empty:
-            median_year = year_built.median()
-            oldest = year_built.min()
-            newest = year_built.max()
-            row2_cols[0].metric("Median Year", f"{median_year:.0f}")
-            row2_cols[0].caption(f"Range: {oldest:.0f} - {newest:.0f}")
-    
-    # ZIP code distribution
-    if 'ZIP_CODE' in property_data.columns:
-        zip_counts = property_data['ZIP_CODE'].value_counts().head(3)
-        if not zip_counts.empty:
-            row2_cols[1].markdown("**Top ZIP Codes:**")
-            zip_text = ""
-            for zip_code, count in zip_counts.items():
-                percentage = 100 * count / len(property_data)
-                zip_text += f"- {zip_code}: {count} ({percentage:.1f}%)\n"
-            row2_cols[1].markdown(zip_text)
-    
-    # Zoning information
-    if 'ZONING_GROUP' in property_data.columns:
-        zoning_counts = property_data['ZONING_GROUP'].value_counts().head(3)
-        if not zoning_counts.empty:
-            row2_cols[2].markdown("**Zoning Groups:**")
-            zoning_text = ""
-            for zone, count in zoning_counts.items():
-                percentage = 100 * count / len(property_data)
-                zoning_text += f"- {zone}: {count} ({percentage:.1f}%)\n"
-            row2_cols[2].markdown(zoning_text)
-            
-    # Square footage
-    if 'SQUARE_FOOTAGE' in property_data.columns:
-        sqft_data = property_data['SQUARE_FOOTAGE'].dropna()
-        if not sqft_data.empty:
-            median_sqft = sqft_data.median()
-            avg_sqft = sqft_data.mean()
-            row2_cols[3].metric("Median SqFt", f"{median_sqft:,.0f}")
-            row2_cols[3].caption(f"Avg: {avg_sqft:,.0f}")
+    st.sidebar.markdown(legend_html, unsafe_allow_html=True)
 
-# Now update where the property details placeholder was shown
-def show_property_details_or_stats():
-    """Show selected property details or overall statistics if no property selected"""
-    if 'selected_property' in st.session_state and st.session_state.selected_property is not None:
-        # Show details for the selected property
-        prop = st.session_state.selected_property
-        st.title(f"Property Details: {prop.get('ADDRESS_LINE_1', 'N/A')}")
-        
-        # Display property information in columns
-        col1, col2 = st.columns(2)
-        
-        # Left column: Basic details
-        with col1:
-            if 'PRICE' in prop:
-                st.metric("Price", f"${prop['PRICE']:,.0f}")
-            
-            details = []
-            if 'BEDROOMS' in prop and pd.notna(prop['BEDROOMS']):
-                details.append(f"{int(prop['BEDROOMS'])} beds")
-            if 'BATHROOMS' in prop and pd.notna(prop['BATHROOMS']):
-                details.append(f"{prop['BATHROOMS']} baths")
-            if 'SQUARE_FOOTAGE' in prop and pd.notna(prop['SQUARE_FOOTAGE']):
-                details.append(f"{int(prop['SQUARE_FOOTAGE']):,} sq ft")
-            
-            if details:
-                st.write(" • ".join(details))
-            
-            if 'FORMATTED_ADDRESS' in prop:
-                st.write(f"📍 {prop['FORMATTED_ADDRESS']}")
-            
-            if 'YEAR_BUILT' in prop and pd.notna(prop['YEAR_BUILT']):
-                st.write(f"🏗️ Built in {int(prop['YEAR_BUILT'])}")
-        
-        # Right column: Additional info
-        with col2:
-            if 'DAYS_ON_MARKET' in prop and pd.notna(prop['DAYS_ON_MARKET']):
-                st.metric("Days on Market", f"{int(prop['DAYS_ON_MARKET'])}")
-            
-            if 'PROPERTY_TYPE' in prop:
-                st.write(f"🏠 {prop['PROPERTY_TYPE']}")
-            
-            if 'ZONING_CODE' in prop:
-                st.write(f"🏢 Zoning: {prop['ZONING_CODE']}")
-            
-            # Calculate and show price per square foot
-            if 'PRICE' in prop and 'SQUARE_FOOTAGE' in prop and pd.notna(prop['SQUARE_FOOTAGE']) and float(prop['SQUARE_FOOTAGE']) > 0:
-                price_per_sqft = prop['PRICE'] / prop['SQUARE_FOOTAGE']
-                st.metric("Price per Sq Ft", f"${price_per_sqft:.2f}")
-    
-    else:
-        # No property selected, show overall statistics instead
-        if 'property_data' in st.session_state and not st.session_state.property_data.empty:
-            listing_type = st.session_state.listing_type if 'listing_type' in st.session_state else "sale"
-            display_property_statistics_main(st.session_state.property_data, listing_type)
-        else:
-            st.info("Apply filters to see property statistics")
-
-# Make sure to call this function where you previously showed the placeholder
-# Replace code like this:
-#   st.subheader("Property Details")
-#   st.info("👈 Click on a property marker to view details")
-# With:
-show_property_details_or_stats()
-
-# ======= MAIN APP =======
 def main():
     """Main Streamlit application"""
     st.title("🏠 RealtyLens: Real Estate Explorer")
@@ -1264,114 +1304,35 @@ def main():
         index=0
     )
     
-    # Show zoning overlay option
-    show_zoning = st.sidebar.checkbox("Show Zoning Overlay", value=False)
+    # Set listing type based on selected table
+    if "FCT_RENT_LISTING" in selected_table:
+        st.session_state.listing_type = "rent"
+    else:
+        st.session_state.listing_type = "sale"
+    
+    # Show zoning overlay option - keep in sidebar for consistency
+    show_zoning = st.sidebar.checkbox("Enable Zoning Overlays", value=False)
+    
+    # Show investment heat map legend in sidebar if viewing sales listings
+    if st.session_state.listing_type == "sale":
+        display_investment_heatmap_legend()
     
     # Progress bar for better UX
     progress_bar = st.progress(0)
     progress_bar.progress(10)
     
-    # Load data
-    data = load_property_data(selected_table)
+    # Load data without any limit
+    data = load_property_data(selected_table, limit=None)
     progress_bar.progress(30)
     
     # Check if data is available
     if len(data) > 0:
-        # Handle the property filters in the sidebar
-        def apply_filters(data):
-            """Apply filters to the property data"""
-            filtered_data = data.copy()
-            
-            # Skip filtering if data is empty
-            if filtered_data.empty:
-                return filtered_data
-            
-            # Price filter
-            if 'PRICE' in filtered_data.columns:
-                min_price = float(filtered_data['PRICE'].min()) if not filtered_data['PRICE'].isna().all() else 0
-                max_price = float(filtered_data['PRICE'].max()) if not filtered_data['PRICE'].isna().all() else 1000000
-                
-                # Round to nearest 10k for better UX
-                min_price = math.floor(min_price / 10000) * 10000
-                max_price = math.ceil(max_price / 10000) * 10000
-                
-                price_range = st.sidebar.slider(
-                    "Price Range ($)",
-                    min_value=int(min_price),
-                    max_value=int(max_price),
-                    value=[int(min_price), int(max_price)],
-                    step=10000
-                )
-                
-                filtered_data = filtered_data[
-                    (filtered_data['PRICE'] >= price_range[0]) & 
-                    (filtered_data['PRICE'] <= price_range[1])
-                ]
-            
-            # Bedrooms filter
-            if 'BEDROOMS' in filtered_data.columns:
-                bed_options = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-                min_beds = st.sidebar.selectbox("Minimum Bedrooms", bed_options, index=0)
-                filtered_data = filtered_data[filtered_data['BEDROOMS'] >= min_beds]
-            
-            # Bathrooms filter
-            if 'BATHROOMS' in filtered_data.columns:
-                bath_options = [0, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6]
-                min_baths = st.sidebar.selectbox("Minimum Bathrooms", bath_options, index=0)
-                filtered_data = filtered_data[filtered_data['BATHROOMS'] >= min_baths]
-            
-            # Square footage filter
-            if 'SQUARE_FOOTAGE' in filtered_data.columns:
-                min_sqft = float(filtered_data['SQUARE_FOOTAGE'].min()) if not filtered_data['SQUARE_FOOTAGE'].isna().all() else 0
-                max_sqft = float(filtered_data['SQUARE_FOOTAGE'].max()) if not filtered_data['SQUARE_FOOTAGE'].isna().all() else 10000
-                
-                # Round to nearest 100 for better UX
-                min_sqft = math.floor(min_sqft / 100) * 100
-                max_sqft = math.ceil(max_sqft / 100) * 100
-                
-                sqft_range = st.sidebar.slider(
-                    "Square Footage",
-                    min_value=int(min_sqft),
-                    max_value=int(max_sqft),
-                    value=[int(min_sqft), int(max_sqft)],
-                    step=100
-                )
-                
-                filtered_data = filtered_data[
-                    (filtered_data['SQUARE_FOOTAGE'] >= sqft_range[0]) & 
-                    (filtered_data['SQUARE_FOOTAGE'] <= sqft_range[1])
-                ]
-            
-            # Property type filter
-            if 'PROPERTY_TYPE' in filtered_data.columns:
-                property_types = ['All Types'] + sorted(filtered_data['PROPERTY_TYPE'].dropna().unique().tolist())
-                selected_type = st.sidebar.selectbox("Property Type", property_types)
-                
-                if selected_type != 'All Types':
-                    filtered_data = filtered_data[filtered_data['PROPERTY_TYPE'] == selected_type]
-            
-            # Days on market filter (if available)
-            if 'DAYS_ON_MARKET' in filtered_data.columns:
-                max_dom = st.sidebar.slider(
-                    "Maximum Days on Market", 
-                    min_value=0, 
-                    max_value=365, 
-                    value=365
-                )
-                filtered_data = filtered_data[filtered_data['DAYS_ON_MARKET'] <= max_dom]
-            
-            # ZIP code filter
-            if 'ZIP_CODE' in filtered_data.columns:
-                zip_codes = ['All ZIP Codes'] + sorted(filtered_data['ZIP_CODE'].dropna().unique().tolist())
-                selected_zip = st.sidebar.selectbox("ZIP Code", zip_codes)
-                
-                if selected_zip != 'All ZIP Codes':
-                    filtered_data = filtered_data[filtered_data['ZIP_CODE'] == selected_zip]
-            
-            return filtered_data
-        
-        # Filter the data
+        # Apply other filters from the sidebar
         filtered_data = apply_filters(data)
+        progress_bar.progress(50)
+        
+        # Store the filtered data in session state for use in other functions
+        st.session_state.property_data = filtered_data
         
         # Sample data for better performance if needed
         display_data = filtered_data
@@ -1383,194 +1344,97 @@ def main():
             display_data = filtered_data
             st.write(f"Showing {len(filtered_data)} properties")
         
-        # Create layout with map on top and statistics below
-        st.title("RealtyLens Property Analytics")
-
-        # Display the map
+        progress_bar.progress(70)
+        
+        # Improved layout for property map
         if filtered_data is not None and not filtered_data.empty:
+            # Check URL parameters for property selection
+            property_selected = False
+            if "property_id" in st.query_params:
+                try:
+                    property_id = int(st.query_params["property_id"])
+                    if property_id >= 0 and property_id < len(filtered_data):
+                        st.session_state.selected_property = filtered_data.iloc[property_id].to_dict()
+                        property_selected = True
+                except:
+                    # Clear invalid property_id
+                    st.query_params.clear()
+            
+            # Full-width map for better visibility
             st.subheader("Property Map")
             
             # Show zoning option only for sales properties if available
-            show_zoning = st.session_state.listing_type == "sale" and 'ZONING_CODE' in filtered_data.columns
-            if show_zoning:
-                show_zoning_toggle = st.checkbox("Show Zoning Areas", value=False)
+            if show_zoning and st.session_state.listing_type == "sale" and 'ZONING_CODE' in filtered_data.columns:
+                show_zoning_toggle = True
+                st.caption("Zoning overlays are enabled. They will appear on the map as colored areas.")
             else:
                 show_zoning_toggle = False
             
             # Get property map
             property_map = create_property_map(filtered_data, st.session_state.listing_type, show_zoning_toggle)
             
-            # Display the map
-            folium_static(property_map, width=1200)
+            # Display the map with full width
+            folium_static(property_map, width=1000, height=600)
             
-            # Now place statistics directly below the map
-            st.markdown("### Market Statistics")
-            display_property_statistics_main(filtered_data, st.session_state.listing_type)
+            # Show investment metrics below the map if available for sales listings
+            if st.session_state.listing_type == "sale" and 'PREDICTED_RENT_PRICE' in filtered_data.columns:
+                st.markdown("<hr style='margin-top: 30px; margin-bottom: 30px;'>", unsafe_allow_html=True)
+                display_sale_rent_prediction_metrics(filtered_data)
+            
+            # If a property is selected, show its details
+            if 'selected_property' in st.session_state and st.session_state.selected_property:
+                st.markdown("<hr style='margin-top: 30px; margin-bottom: 30px;'>", unsafe_allow_html=True)
+                st.subheader("Property Details")
+                display_property_details(st.session_state.selected_property)
+                
+                # Add a button to clear selection
+                if st.button("Close Property Details"):
+                    st.session_state.selected_property = None
+                    # Clear URL parameters
+                    st.query_params.clear()
+                    st.experimental_rerun()
+            
+            # Show property highlights
+            if not property_selected:
+                st.markdown("<hr style='margin-top: 30px; margin-bottom: 30px;'>", unsafe_allow_html=True)
+                st.subheader("Property Highlights")
+                
+                # Create columns for property highlights
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    # Most expensive property
+                    if 'PRICE' in filtered_data.columns and not filtered_data.empty:
+                        expensive = filtered_data.loc[filtered_data['PRICE'].idxmax()]
+                        st.markdown("#### Most Expensive Property")
+                        st.markdown(f"**${expensive['PRICE']:,.0f}** - {expensive['FORMATTED_ADDRESS']}")
+                        st.markdown(f"{int(expensive['BEDROOMS'])} bed, {expensive['BATHROOMS']} bath, {int(expensive['SQUARE_FOOTAGE']):,} sq ft")
+                
+                with col2:
+                    # Best investment property (if applicable) - only for sale listings
+                    if st.session_state.listing_type == "sale" and 'RENT_TO_PRICE_RATIO' in filtered_data.columns and not filtered_data.empty and not filtered_data['RENT_TO_PRICE_RATIO'].isna().all():
+                        best_investment = filtered_data.loc[filtered_data['RENT_TO_PRICE_RATIO'].idxmax()]
+                        annual_yield = best_investment['RENT_TO_PRICE_RATIO'] * 12 * 100
+                        
+                        st.markdown("#### Best Investment Property")
+                        st.markdown(f"**{annual_yield:.2f}% yield** - {best_investment['FORMATTED_ADDRESS']}")
+                        st.markdown(f"Price: ${best_investment['PRICE']:,.0f} | Est. Rent: ${best_investment['PREDICTED_RENT_PRICE']:,.0f}/mo")
+                
+                # Show market overview WITHOUT expandable section
+                st.markdown("<hr style='margin-top: 30px; margin-bottom: 30px;'>", unsafe_allow_html=True)
+                st.subheader("Market Statistics")
+                # Display market statistics directly without the expander
+                display_property_statistics_main(filtered_data, st.session_state.listing_type)
         else:
             st.info("No properties found matching your criteria. Try adjusting your filters.")
         
-        # Continue with the rest of the app (property details or other content would go below)
-        # ... existing code ...
+        progress_bar.progress(100)
+        progress_bar.empty()
     else:
         st.error("No data available. Please check your database connection.")
     
     # Always render database indicator at the very end
     render_db_indicator()
-
-# Initialize all session state variables properly at the start of the app
-def initialize_session_state():
-    """Initialize all session state variables to prevent type errors"""
-    # Define all variables that should be lists
-    list_variables = ['property_history', 'search_history', 'viewed_properties']
-    for var in list_variables:
-        if var not in st.session_state:
-            st.session_state[var] = []
-        elif not isinstance(st.session_state[var], list):
-            st.session_state[var] = []
-    
-    # Define variables that should be dictionaries
-    dict_variables = ['property_stats', 'market_data']
-    for var in dict_variables:
-        if var not in st.session_state:
-            st.session_state[var] = {}
-        elif not isinstance(st.session_state[var], dict):
-            st.session_state[var] = {}
-    
-    # Define all scalar variables with their default types
-    scalar_defaults = {
-        'db_hit_indicator': False,
-        'query_count': 0,
-        'filter_applied': False,
-        'current_zip': "",
-        'listing_type': "sale",
-        'selected_property': None,
-        'map_center': None,
-        'snowflake_queries': []  # This should actually be a list
-    }
-    
-    for var, default in scalar_defaults.items():
-        if var not in st.session_state:
-            st.session_state[var] = default
-        elif not isinstance(st.session_state[var], type(default)) and var != 'selected_property':
-            # Reset to default if type doesn't match (except for selected_property which can be None or dict)
-            st.session_state[var] = default
-
-# Call this function at the very beginning of your app
-initialize_session_state()
-
-# Make sure all session state variables are fixed whenever the app runs
-if 'session_fixed' not in st.session_state:
-    fix_all_session_state()
-    st.session_state.session_fixed = True
-
-# Function to create sample rental data
-def create_sample_rental_data():
-    """Create sample rental property data"""
-    import pandas as pd
-    import numpy as np
-    from datetime import datetime
-    
-    # Create sample data with 20 properties
-    n_samples = 20
-    
-    # Common address parts
-    streets = ['Main St', 'Oak Ave', 'Maple Dr', 'Washington Blvd', 'Park Rd']
-    cities = ['San Francisco', 'Oakland', 'Berkeley', 'San Jose', 'Palo Alto']
-    zip_codes = ['94101', '94102', '94103', '94104', '94105', '94606', '94607', '94704', '94705']
-    
-    # Generate random data
-    data = {
-        'LISTING_ID': [f"R{1000 + i}" for i in range(n_samples)],
-        'PROPERTY_SK': [f"P{2000 + i}" for i in range(n_samples)],
-        'PRICE': np.random.randint(1500, 5000, n_samples),  # Rent prices
-        'PROPERTY_TYPE': np.random.choice(['Apartment', 'Condo', 'House', 'Townhouse'], n_samples),
-        'BEDROOMS': np.random.choice([1, 2, 3, 4], n_samples),
-        'BATHROOMS': np.random.choice([1, 1.5, 2, 2.5], n_samples),
-        'SQUARE_FOOTAGE': np.random.randint(600, 2000, n_samples),
-        'YEAR_BUILT': np.random.randint(1950, 2020, n_samples),
-        'DAYS_ON_MARKET': np.random.randint(1, 60, n_samples),
-        'ZIP_CODE': np.random.choice(zip_codes, n_samples),
-        'ZONING_GROUP': np.random.choice(['Residential', 'Mixed-Use', 'Commercial'], n_samples),
-        'ZONING_CODE': np.random.choice(['R-1', 'R-2', 'RM-1', 'C-1', 'M-1'], n_samples),
-    }
-    
-    # Generate addresses
-    addresses = []
-    for i in range(n_samples):
-        number = np.random.randint(100, 999)
-        street = np.random.choice(streets)
-        city = np.random.choice(cities)
-        zip_code = data['ZIP_CODE'][i]
-        addresses.append(f"{number} {street}, {city}, CA {zip_code}")
-    
-    data['FORMATTED_ADDRESS'] = addresses
-    data['ADDRESS_LINE_1'] = [addr.split(',')[0] for addr in addresses]
-    
-    # Generate locations (San Francisco Bay Area)
-    data['LATITUDE'] = np.random.uniform(37.7, 37.9, n_samples)
-    data['LONGITUDE'] = np.random.uniform(-122.5, -122.3, n_samples)
-    
-    # Create load date
-    data['LOAD_DATE'] = datetime.now().strftime('%Y-%m-%d')
-    
-    return pd.DataFrame(data)
-
-# Function to create sample sales data
-def create_sample_sales_data():
-    """Create sample sales property data"""
-    import pandas as pd
-    import numpy as np
-    from datetime import datetime
-    
-    # Create sample data with 20 properties
-    n_samples = 20
-    
-    # Common address parts
-    streets = ['Mission St', 'Valencia St', 'Castro St', 'Market St', 'Geary Blvd']
-    cities = ['San Francisco', 'Oakland', 'Berkeley', 'San Jose', 'Palo Alto']
-    zip_codes = ['94101', '94102', '94103', '94104', '94105', '94606', '94607', '94704', '94705']
-    
-    # Generate random data
-    data = {
-        'LISTING_ID': [f"S{3000 + i}" for i in range(n_samples)],
-        'PROPERTY_SK': [f"P{4000 + i}" for i in range(n_samples)],
-        'PRICE': np.random.randint(500000, 2500000, n_samples),  # Sale prices
-        'PROPERTY_TYPE': np.random.choice(['Single Family', 'Condo', 'Multi-Family', 'Townhouse'], n_samples),
-        'BEDROOMS': np.random.choice([2, 3, 4, 5], n_samples),
-        'BATHROOMS': np.random.choice([1, 1.5, 2, 2.5, 3], n_samples),
-        'SQUARE_FOOTAGE': np.random.randint(800, 3000, n_samples),
-        'YEAR_BUILT': np.random.randint(1920, 2020, n_samples),
-        'DAYS_ON_MARKET': np.random.randint(5, 120, n_samples),
-        'ZIP_CODE': np.random.choice(zip_codes, n_samples),
-        'ZONING_GROUP': np.random.choice(['Residential', 'Mixed-Use', 'Commercial'], n_samples),
-        'ZONING_CODE': np.random.choice(['R-1', 'R-2', 'RM-1', 'C-1', 'M-1'], n_samples),
-    }
-    
-    # Generate addresses
-    addresses = []
-    for i in range(n_samples):
-        number = np.random.randint(100, 999)
-        street = np.random.choice(streets)
-        city = np.random.choice(cities)
-        zip_code = data['ZIP_CODE'][i]
-        addresses.append(f"{number} {street}, {city}, CA {zip_code}")
-    
-    data['FORMATTED_ADDRESS'] = addresses
-    data['ADDRESS_LINE_1'] = [addr.split(',')[0] for addr in addresses]
-    
-    # Generate locations (San Francisco Bay Area)
-    data['LATITUDE'] = np.random.uniform(37.7, 37.9, n_samples)
-    data['LONGITUDE'] = np.random.uniform(-122.5, -122.3, n_samples)
-    
-    # Additional sale-specific fields
-    data['LAST_SALE_PRICE'] = [price * 0.8 for price in data['PRICE']]  # 80% of current price
-    data['LAST_SALE_DATE'] = [(datetime.now() - pd.Timedelta(days=np.random.randint(365, 1825))).strftime('%Y-%m-%d') for _ in range(n_samples)]
-    data['LOT_SIZE'] = np.random.randint(1000, 6000, n_samples)
-    
-    # Create load date
-    data['LOAD_DATE'] = datetime.now().strftime('%Y-%m-%d')
-    
-    return pd.DataFrame(data)
 
 if __name__ == "__main__":
     main()

@@ -1,0 +1,6 @@
+pandas
+numpy
+scikit-learn
+joblib
+snowflake-snowpark-python[pandas]>=1.11.1
+snowflake-ml-python>=1.1.2

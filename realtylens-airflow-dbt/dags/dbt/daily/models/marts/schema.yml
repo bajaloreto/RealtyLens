@@ -1,0 +1,26 @@
+version: 2
+
+sources:
+  - name: realtylens
+    database: "{{ env_var('DBT_DATABASE', 'DATAEXPERT_STUDENT') }}"
+    schema: "{{ env_var('DBT_SCHEMA', 'jmusni07') }}"
+    tables:
+      - name: PREDICTED_RENT_PRICES
+        description: "Predicted rental prices for sale listings"
+        columns:
+          - name: LISTING_SK
+            description: "Surrogate key for the listing"
+          - name: LISTING_ID
+            description: "Natural key for the listing"
+          - name: SALE_PRICE
+            description: "The list price for sale"
+          - name: PREDICTED_RENT_PRICE
+            description: "Predicted monthly rental price"
+          - name: RENT_TO_PRICE_RATIO
+            description: "Ratio of predicted monthly rent to sale price"
+          - name: LOAD_DATE
+            description: "The date the sale listing was loaded"
+          - name: MODEL_VERSION
+            description: "The ML model version used for prediction"
+          - name: PREDICTION_DATE
+            description: "Timestamp when the prediction was made" 
