@@ -53,8 +53,8 @@ if 'db_hit_timestamp' not in st.session_state:
     st.session_state['db_hit_timestamp'] = None
 
 # ======= PERFORMANCE CONFIGURATION =======
-MAX_VISIBLE_MARKERS = 1000  # Limit markers for better performance
-ENABLE_DATA_SAMPLING = True  # Sample data for faster rendering
+MAX_VISIBLE_MARKERS = 5000  # Increased from 1000 to 5000
+ENABLE_DATA_SAMPLING = False  # Disabled sampling for full data display
 CACHE_EXPIRATION_DAYS = 30   # Longer cache for better performance
 
 # Create cache directory if it doesn't exist
@@ -244,7 +244,7 @@ def fix_all_session_state():
 
 # ======= DATA LOADING =======
 @st.cache_data
-def load_property_data(table_name, limit=1000):
+def load_property_data(table_name, limit=None):
     """Load property data with adaptability for different table structures"""
     try:
         # First, check if the table has LOAD_DATE and PROPERTY_SK
@@ -357,7 +357,6 @@ def load_property_data(table_name, limit=1000):
             
             query += f"""
             WHERE r.LOAD_DATE = (SELECT max_load_date FROM latest_load)
-            LIMIT {limit}
             """
         elif has_property_sk:
             # No LOAD_DATE, but we can still join to DIM_PROPERTY
@@ -429,7 +428,6 @@ def load_property_data(table_name, limit=1000):
             query = f"""
             SELECT {col_list}
             FROM DATAEXPERT_STUDENT.JMUSNI07.{table_name} r
-            LIMIT {limit}
             """
         
         # Execute the query safely
@@ -624,7 +622,7 @@ def display_property_details(property_data):
             ).add_to(property_map)
             
             # Display the map
-            folium_static(property_map, width=1200, height=600)
+            folium_static(property_map, width=800, height=400)
         else:
             st.warning("No location data available for this property")
         
@@ -679,240 +677,212 @@ class Legend(MacroElement):
             """)
 
 def create_property_map(property_data, listing_type="sale", show_zoning=False):
-    """Create an interactive map with property markers"""
-    if property_data is None or property_data.empty:
-        # Return a default Seattle map if no data
-        return folium.Map(location=[47.6062, -122.3321], zoom_start=12)
-    
-    # Calculate the center of the map based on data
-    center_lat = property_data['LATITUDE'].mean()
-    center_lon = property_data['LONGITUDE'].mean()
-    
-    # Create a map centered on the properties
-    property_map = folium.Map(location=[center_lat, center_lon], zoom_start=12)
-    
-    # Add a marker cluster for better performance with many markers
-    marker_cluster = MarkerCluster().add_to(property_map)
-    
-    # Zoning layer group (only show if enabled)
-    if show_zoning:
-        zoning_group = folium.FeatureGroup(name="Zoning Areas", show=True)
-        property_map.add_child(zoning_group)
+    """Create an interactive map with color-coded price tag markers"""
+    try:
+        if property_data is None or property_data.empty:
+            return folium.Map(location=[47.6062, -122.3321], zoom_start=12)
         
-        # Add zoning areas
-        added_zones = set()  # Track which zones we've already added
+        # Drop any rows with missing coordinates
+        valid_data = property_data.dropna(subset=['LATITUDE', 'LONGITUDE'])
         
-        for _, property_row in property_data.iterrows():
-            zoning_code = property_row.get('ZONING_CODE')
-            polygon_geojson = property_row.get('POLYGON_GEOJSON')
+        if valid_data.empty:
+            return folium.Map(location=[47.6062, -122.3321], zoom_start=12)
+        
+        # Calculate map center using median of coordinates
+        map_center = [valid_data['LATITUDE'].median(), valid_data['LONGITUDE'].median()]
+        
+        # Create base map
+        property_map = folium.Map(
+            location=map_center, 
+            zoom_start=12, 
+            control_scale=True
+        )
+        
+        # Create a marker cluster group with optimized settings
+        marker_cluster = MarkerCluster(
+            name="Properties",
+            options={
+                'maxClusterRadius': 60,
+                'disableClusteringAtZoom': 16,
+                'chunkedLoading': True,
+                'chunkDelay': 10
+            }
+        )
+        marker_cluster.add_to(property_map)
+        
+        # Process properties in smaller batches for better performance
+        batch_size = 500
+        total_batches = len(valid_data) // batch_size + (1 if len(valid_data) % batch_size > 0 else 0)
+        
+        for batch_idx in range(total_batches):
+            start_idx = batch_idx * batch_size
+            end_idx = min(start_idx + batch_size, len(valid_data))
+            batch = valid_data.iloc[start_idx:end_idx]
             
-            # Only add each unique zoning code once
-            if zoning_code and polygon_geojson and zoning_code not in added_zones:
+            for idx, property_row in batch.iterrows():
                 try:
-                    # Parse the GeoJSON
-                    geojson_data = json.loads(polygon_geojson)
+                    # Skip if missing lat/long
+                    if pd.isna(property_row['LATITUDE']) or pd.isna(property_row['LONGITUDE']):
+                        continue
                     
-                    # Generate a color based on the zoning code
-                    color = generate_color_from_string(zoning_code)
+                    # Extract basic property info
+                    price = property_row.get('PRICE', 0)
+                    bedrooms = property_row.get('BEDROOMS', 0)
+                    bathrooms = property_row.get('BATHROOMS', 0)
                     
-                    # Add the zoning area to the map
-                    folium.GeoJson(
-                        geojson_data,
-                        name=f"Zoning: {zoning_code}",
-                        style_function=lambda x, color=color: {
-                            'fillColor': color,
-                            'color': 'black',
-                            'weight': 1,
-                            'fillOpacity': 0.4
-                        },
-                        tooltip=f"Zoning: {zoning_code} - {property_row.get('ZONING_GROUP', 'Unknown')}",
-                    ).add_to(zoning_group)
+                    # Determine investment quality and color code
+                    bg_color = '#3498db'  # Default blue
                     
-                    added_zones.add(zoning_code)
+                    if listing_type == "sale" and 'RENT_TO_PRICE_RATIO' in property_row and pd.notna(property_row['RENT_TO_PRICE_RATIO']):
+                        annual_yield = property_row['RENT_TO_PRICE_RATIO'] * 12 * 100
+                        if annual_yield > 8:
+                            bg_color = '#27ae60'  # Green
+                        elif annual_yield > 6:
+                            bg_color = '#f39c12'  # Orange
+                        else:
+                            bg_color = '#e74c3c'  # Red
+                    
+                    # Format price for shorter display
+                    if price >= 1000000:
+                        price_display = f"${price/1000000:.1f}M"
+                    else:
+                        price_display = f"${price/1000:.0f}K"
+                    
+                    # Create simple price tag with inline styles to ensure it works
+                    icon_html = f"""
+                    <div style="
+                        background-color: {bg_color}; 
+                        color: white; 
+                        padding: 3px 8px; 
+                        border-radius: 4px;
+                        font-weight: bold;
+                        text-align: center;
+                        font-size: 12px;
+                        box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+                        min-width: 50px;
+                        font-family: Arial, sans-serif;">
+                        {price_display}
+                    </div>
+                    """
+                    
+                    # Use DivIcon for the price tag
+                    icon = folium.DivIcon(
+                        icon_size=(70, 20),
+                        icon_anchor=(35, 10),
+                        html=icon_html
+                    )
+                    
+                    # Add marker with all details in popup
+                    folium.Marker(
+                        location=[float(property_row['LATITUDE']), float(property_row['LONGITUDE'])],
+                        icon=icon,
+                        popup=folium.Popup(create_property_popup(property_row, "", listing_type, idx), max_width=300),
+                        tooltip=f"${price:,.0f} - {bedrooms} bed, {bathrooms} bath"
+                    ).add_to(marker_cluster)
+                    
                 except Exception as e:
-                    # Silently continue if we can't parse a particular polygon
+                    # Skip any problematic markers
                     continue
+        
+        # Note: We're not adding the legend to the map here anymore
+        # It will be displayed in the Streamlit UI instead
+        
+        return property_map
     
-    # Add investment quality legend for sale listings
-    if listing_type == "sale":
-        # Add a custom legend control
-        property_map.add_child(Legend())
-    
-    # Add property markers
-    for idx, property_row in property_data.iterrows():
-        # Skip properties without coordinates
-        if pd.isna(property_row['LATITUDE']) or pd.isna(property_row['LONGITUDE']):
-            continue
+    except Exception as e:
+        st.error(f"Error creating map: {str(e)}")
+        return folium.Map(location=[47.6062, -122.3321], zoom_start=12)
+
+def create_property_popup(property_row, popup_style, listing_type, idx):
+    """Create detailed popup HTML for a property"""
+    try:
+        # Extract property info
+        address = property_row.get('FORMATTED_ADDRESS', 'Address not available')
+        price = property_row.get('PRICE', 0)
+        bedrooms = property_row.get('BEDROOMS', 0)
+        bathrooms = property_row.get('BATHROOMS', 0)
+        sqft = property_row.get('SQUARE_FOOTAGE', 0)
         
-        # Get property information - use safe access with defaults
-        bedrooms = int(property_row['BEDROOMS']) if pd.notna(property_row['BEDROOMS']) else 0
-        bathrooms = property_row['BATHROOMS'] if pd.notna(property_row['BATHROOMS']) else 0
-        sqft = int(property_row['SQUARE_FOOTAGE']) if pd.notna(property_row['SQUARE_FOOTAGE']) else 0
-        price = property_row['PRICE'] if pd.notna(property_row['PRICE']) else 0
-        address = property_row['FORMATTED_ADDRESS']
-        prop_type = property_row.get('PROPERTY_TYPE', 'Unknown')
-        year_built = int(property_row.get('YEAR_BUILT', 0)) if pd.notna(property_row.get('YEAR_BUILT')) else 'N/A'
-        
-        # Determine icon color based on listing type and property data
-        icon_color = 'blue'  # Default color
-        
-        # Simplified color logic for better reliability
-        if listing_type == "sale" and 'RENT_TO_PRICE_RATIO' in property_row:
-            ratio_value = property_row['RENT_TO_PRICE_RATIO']
-            if pd.notna(ratio_value):
-                ratio = ratio_value * 12 * 100  # Annual percentage
-                
-                if ratio > 10:
-                    icon_color = 'green'        # Excellent yield (>10%)
-                elif ratio > 8:
-                    icon_color = 'lightgreen'   # Good yield (8-10%)
-                elif ratio > 6:
-                    icon_color = 'orange'       # Average yield (6-8%)
-                else:
-                    icon_color = 'red'          # Below average (<6%)
-        
-        # Format the price for display
-        formatted_price = f"${price/1000:.0f}K" if price < 1000000 else f"${price/1000000:.1f}M"
-        
-        # Create comprehensive popup with all property details
+        # Start popup HTML
         popup_html = f"""
-        <div style="width: 400px; max-height: 500px; overflow-y: auto; font-family: Arial, sans-serif; padding: 10px;">
-            <h3 style="margin-top: 0; color: #2c3e50;">{address}</h3>
-            <h2 style="color: #3498db; margin-top: 5px; margin-bottom: 10px;">${price:,.0f}</h2>
-            
-            <div style="background-color: #f8f9fa; padding: 10px; border-radius: 5px; margin-bottom: 15px;">
-                <div style="font-size: 18px; font-weight: bold;">
-                    {bedrooms} bed • {bathrooms} bath • {sqft:,} sq ft
-                </div>
-                <div style="margin-top: 5px;">
-                    {prop_type} • Built: {year_built}
-                </div>
-            </div>
+        {popup_style}
+        <div class="property-popup">
+            <h3>{address}</h3>
+            <table>
+                <tr>
+                    <td><strong>Price:</strong></td>
+                    <td>${price:,.0f}</td>
+                </tr>
+                <tr>
+                    <td><strong>Beds/Baths:</strong></td>
+                    <td>{bedrooms} bed, {bathrooms} bath</td>
+                </tr>
         """
         
-        # Add more property details to popup if available
-        detail_rows = []
+        # Add square footage if available
+        if sqft and pd.notna(sqft):
+            popup_html += f"""
+                <tr>
+                    <td><strong>Size:</strong></td>
+                    <td>{sqft:,.0f} sq ft</td>
+                </tr>
+            """
         
-        # Add lot size if available
-        if 'LOT_SIZE' in property_row and pd.notna(property_row['LOT_SIZE']):
-            lot_size = int(property_row['LOT_SIZE'])
-            detail_rows.append(f"<tr><td>Lot Size</td><td>{lot_size:,} sq ft</td></tr>")
+        # Add property type if available
+        if 'PROPERTY_TYPE' in property_row and pd.notna(property_row['PROPERTY_TYPE']):
+            popup_html += f"""
+                <tr>
+                    <td><strong>Type:</strong></td>
+                    <td>{property_row['PROPERTY_TYPE']}</td>
+                </tr>
+            """
         
-        # Add city and zip if available
-        if 'CITY' in property_row and pd.notna(property_row['CITY']):
-            city = property_row['CITY']
-            if 'ZIP_CODE' in property_row and pd.notna(property_row['ZIP_CODE']):
-                city += f", {property_row['ZIP_CODE']}"
-            detail_rows.append(f"<tr><td>Location</td><td>{city}</td></tr>")
+        # Add year built if available
+        if 'YEAR_BUILT' in property_row and pd.notna(property_row['YEAR_BUILT']):
+            popup_html += f"""
+                <tr>
+                    <td><strong>Year Built:</strong></td>
+                    <td>{int(property_row['YEAR_BUILT'])}</td>
+                </tr>
+            """
         
-        # Add investment metrics if this is a sale listing
+        # Add investment metrics for sale listings
         if listing_type == "sale" and 'PREDICTED_RENT_PRICE' in property_row and pd.notna(property_row['PREDICTED_RENT_PRICE']):
-            est_rent = property_row['PREDICTED_RENT_PRICE']
-            detail_rows.append(f"<tr><td>Est. Monthly Rent</td><td>${est_rent:,.0f}</td></tr>")
+            pred_rent = property_row['PREDICTED_RENT_PRICE']
+            popup_html += f"""
+                <tr>
+                    <td><strong>Est. Rent:</strong></td>
+                    <td>${pred_rent:,.0f}/mo</td>
+                </tr>
+            """
             
             if 'RENT_TO_PRICE_RATIO' in property_row and pd.notna(property_row['RENT_TO_PRICE_RATIO']):
                 annual_yield = property_row['RENT_TO_PRICE_RATIO'] * 12 * 100
-                yield_color = '#e74c3c'  # Default red
-                if annual_yield > 10:
-                    yield_color = '#2ecc71'  # Green for excellent
-                elif annual_yield > 8:
-                    yield_color = '#27ae60'  # Lighter green for good
-                elif annual_yield > 6:
-                    yield_color = '#f39c12'  # Orange for average
-                
-                detail_rows.append(f"<tr><td>Annual Yield</td><td><span style='color: {yield_color}; font-weight: bold;'>{annual_yield:.2f}%</span></td></tr>")
-                
-                # Add estimated mortgage calculation
-                mortgage_payment = (price * 0.8 * (0.05/12) * (1 + 0.05/12)**(30*12)) / ((1 + 0.05/12)**(30*12) - 1)
-                detail_rows.append(f"<tr><td>Est. Mortgage</td><td>${mortgage_payment:,.0f}/mo</td></tr>")
-                
-                # Calculate estimated cash flow
-                monthly_expenses = price * 0.02 / 12  # Roughly 2% annually for taxes, insurance, maintenance
-                cash_flow = est_rent - mortgage_payment - monthly_expenses
-                cash_flow_color = '#2ecc71' if cash_flow > 0 else '#e74c3c'
-                
-                detail_rows.append(f"<tr><td>Est. Cash Flow</td><td><span style='color: {cash_flow_color}; font-weight: bold;'>${cash_flow:,.0f}/mo</span></td></tr>")
+                yield_color = "#27ae60" if annual_yield > 8 else ("#f39c12" if annual_yield > 6 else "#e74c3c")
+                popup_html += f"""
+                    <tr>
+                        <td><strong>Annual Yield:</strong></td>
+                        <td><span style="color:{yield_color}; font-weight:bold;">{annual_yield:.2f}%</span></td>
+                    </tr>
+                """
         
-        # Add price per square foot
-        if sqft > 0:
-            price_per_sqft = price / sqft
-            detail_rows.append(f"<tr><td>Price/SqFt</td><td>${price_per_sqft:.2f}</td></tr>")
-        
-        # Add details to popup if we have any
-        if detail_rows:
-            popup_html += """
-            <h4 style="margin-top: 15px; margin-bottom: 10px; border-bottom: 1px solid #e0e0e0; padding-bottom: 5px;">
-                Property Details
-            </h4>
-            <table style="width: 100%; border-collapse: collapse;">
-            """
-            popup_html += "\n".join(detail_rows)
-            popup_html += "</table>"
-        
-        # Add external links
+        # Close the table and add links
         encoded_address = urllib.parse.quote(address)
-        google_url = f"https://www.google.com/search?q={encoded_address}"
-        zillow_url = f"https://www.zillow.com/homes/{encoded_address}_rb/"
-        maps_url = f"https://www.google.com/maps/search/?api=1&query={encoded_address}"
-        
         popup_html += f"""
-        <div style="margin-top: 15px; text-align: center;">
-            <a href="{google_url}" target="_blank" style="display: inline-block; margin: 0 5px; color: #3498db; text-decoration: none;">
-                <strong>🔍 Google</strong>
-            </a>
-            <a href="{zillow_url}" target="_blank" style="display: inline-block; margin: 0 5px; color: #3498db; text-decoration: none;">
-                <strong>🏠 Zillow</strong>
-            </a>
-            <a href="{maps_url}" target="_blank" style="display: inline-block; margin: 0 5px; color: #3498db; text-decoration: none;">
-                <strong>🗺️ Maps</strong>
-            </a>
-        </div>
+            </table>
+            <div class="links">
+                <a href="?property_id={idx}" target="_self"><strong>View Details</strong></a> | 
+                <a href="https://www.google.com/maps/search/?api=1&query={encoded_address}" target="_blank">Maps</a> | 
+                <a href="https://www.zillow.com/homes/{encoded_address}_rb/" target="_blank">Zillow</a>
+            </div>
         </div>
         """
         
-        # Create a simple tooltip
-        tooltip = f"{address}: {formatted_price}"
-        
-        # Create a custom icon with price tag
-        try:
-            custom_icon = folium.DivIcon(
-                html=f'''
-                <div>
-                    <div style="position: relative;">
-                        <i class="fa fa-home" style="font-size: 24px; color: {icon_color};"></i>
-                        <div style="position: absolute; top: -10px; left: 20px; 
-                             background-color: {icon_color}; color: white; 
-                             padding: 2px 4px; font-size: 10px; 
-                             border-radius: 3px; white-space: nowrap;">
-                            {formatted_price}
-                        </div>
-                    </div>
-                </div>
-                ''',
-                icon_size=(50, 30),
-                icon_anchor=(15, 15),
-                class_name="custom-div-icon"
-            )
-            
-            folium.Marker(
-                location=[property_row['LATITUDE'], property_row['LONGITUDE']],
-                popup=folium.Popup(popup_html, max_width=450),
-                tooltip=tooltip,
-                icon=custom_icon
-            ).add_to(marker_cluster)
-        except Exception as e:
-            # Fallback to standard icon if DivIcon fails
-            folium.Marker(
-                location=[property_row['LATITUDE'], property_row['LONGITUDE']],
-                popup=folium.Popup(popup_html, max_width=450),
-                tooltip=tooltip,
-                icon=folium.Icon(icon='home', prefix='fa', color=icon_color)
-            ).add_to(marker_cluster)
+        return popup_html
     
-    # Add layer control
-    folium.LayerControl().add_to(property_map)
-    
-    return property_map
+    except Exception as e:
+        # Return a simple popup on error
+        return f"<div>Property at {property_row.get('FORMATTED_ADDRESS', 'Unknown')}</div>"
 
 def apply_filters(property_data):
     """Apply user-selected filters to the property data"""
@@ -945,7 +915,6 @@ def apply_filters(property_data):
     if 'BEDROOMS' in filtered_data.columns:
         # Filter out None values before sorting
         valid_bedrooms = [b for b in filtered_data['BEDROOMS'].unique() if pd.notna(b)]
-        
         bedrooms = st.sidebar.multiselect(
             "Bedrooms",
             options=sorted(valid_bedrooms),
@@ -1269,6 +1238,55 @@ def display_property_statistics_main(property_data, listing_type="sale"):
                 fig.update_layout(height=250)
                 st.plotly_chart(fig, use_container_width=True)
 
+def display_investment_heatmap_legend():
+    """Display the investment heat map legend in the Streamlit UI"""
+    st.sidebar.markdown("## Investment Heat Map")
+    st.sidebar.markdown("Color indicates investment quality based on annual rental yield:")
+    
+    # Create a consistent style for the legend items
+    legend_style = """
+    <style>
+    .legend-item {
+        display: flex;
+        align-items: center;
+        margin-bottom: 10px;
+    }
+    .color-box {
+        width: 20px;
+        height: 20px;
+        margin-right: 10px;
+        border-radius: 3px;
+    }
+    .legend-text {
+        font-size: 14px;
+    }
+    </style>
+    """
+    
+    st.sidebar.markdown(legend_style, unsafe_allow_html=True)
+    
+    # Create legend items
+    legend_html = """
+    <div class="legend-item">
+        <div class="color-box" style="background-color: #27ae60;"></div>
+        <div class="legend-text"><strong>Excellent</strong> (>8% yield)</div>
+    </div>
+    <div class="legend-item">
+        <div class="color-box" style="background-color: #f39c12;"></div>
+        <div class="legend-text"><strong>Good</strong> (6-8% yield)</div>
+    </div>
+    <div class="legend-item">
+        <div class="color-box" style="background-color: #e74c3c;"></div>
+        <div class="legend-text"><strong>Below Average</strong> (<6% yield)</div>
+    </div>
+    <div class="legend-item">
+        <div class="color-box" style="background-color: #3498db;"></div>
+        <div class="legend-text"><strong>Not Evaluated</strong></div>
+    </div>
+    """
+    
+    st.sidebar.markdown(legend_html, unsafe_allow_html=True)
+
 def main():
     """Main Streamlit application"""
     st.title("🏠 RealtyLens: Real Estate Explorer")
@@ -1295,12 +1313,16 @@ def main():
     # Show zoning overlay option - keep in sidebar for consistency
     show_zoning = st.sidebar.checkbox("Enable Zoning Overlays", value=False)
     
+    # Show investment heat map legend in sidebar if viewing sales listings
+    if st.session_state.listing_type == "sale":
+        display_investment_heatmap_legend()
+    
     # Progress bar for better UX
     progress_bar = st.progress(0)
     progress_bar.progress(10)
     
-    # Load data first
-    data = load_property_data(selected_table)
+    # Load data without any limit
+    data = load_property_data(selected_table, limit=None)
     progress_bar.progress(30)
     
     # Check if data is available
@@ -1352,7 +1374,7 @@ def main():
             property_map = create_property_map(filtered_data, st.session_state.listing_type, show_zoning_toggle)
             
             # Display the map with full width
-            folium_static(property_map, width=1350, height=700)
+            folium_static(property_map, width=800, height=600)
             
             # Show investment metrics below the map if available for sales listings
             if st.session_state.listing_type == "sale" and 'PREDICTED_RENT_PRICE' in filtered_data.columns:
