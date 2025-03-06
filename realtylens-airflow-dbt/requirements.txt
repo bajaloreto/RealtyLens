@@ -1,7 +1,6 @@
 dbt-snowflake==1.6.0
 apache-airflow-providers-snowflake==5.1.1
 astronomer-cosmos==1.9.0
-astro-provider-snowflake
 scikit-learn
 pandas
 numpy
