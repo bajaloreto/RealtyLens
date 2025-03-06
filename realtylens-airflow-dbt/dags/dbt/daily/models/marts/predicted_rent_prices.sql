@@ -14,6 +14,6 @@ SELECT
     PREDICTED_RENT_PRICE,
     RENT_TO_PRICE_RATIO,
     LOAD_DATE,
-    MODEL_VERSION,
+    MODEL_VERSION
 FROM 
-    {{ source('realtylens', 'PREDICTED_RENT_PRICES') }} 
+    {{ source('realtylens', 'PREDICTED_RENT_PRICES') }} å
