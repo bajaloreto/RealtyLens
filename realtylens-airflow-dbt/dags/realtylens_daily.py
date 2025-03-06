@@ -14,6 +14,7 @@ from cosmos import DbtTaskGroup, ProjectConfig, ProfileConfig, ExecutionConfig
 from cosmos.profiles import SnowflakeUserPasswordProfileMapping
 from cosmos import DbtTaskGroup, RenderConfig
 from cosmos.constants import SourceRenderingBehavior
+from include.scripts.rent_price_predictor import predict_rent_prices
 
 
 # Function to import necessary modules
@@ -135,10 +136,22 @@ def realtylens_daily():
         render_config=RenderConfig(source_rendering_behavior=SourceRenderingBehavior.ALL),
     )
 
+    predict_rent = PythonOperator(
+        task_id='predict_rent_prices',
+        python_callable=predict_rent_prices,
+        op_kwargs={
+            'snowflake_conn_id': 'snowflake_conn',
+            'database': 'DATAEXPERT_STUDENT',
+            'schema': 'jmusni07',
+            'model_registry_table': 'model_registry',
+            'model_version': None  # Use latest model
+        }
+    )
+
     # Define task dependencies
     check_data >> [create_schema, extract_data]
     extract_data >> create_schema
-    create_schema >> setup_stages >> refresh_stages >> load_data >> transform_data
+    create_schema >> setup_stages >> refresh_stages >> load_data >> transform_data >> predict_rent
 
     return dag
 
