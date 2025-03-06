@@ -16,4 +16,4 @@ SELECT
     LOAD_DATE,
     MODEL_VERSION
 FROM 
-    {{ source('realtylens', 'PREDICTED_RENT_PRICES') }} å
+    {{ source('realtylens', 'PREDICTED_RENT_PRICES') }}

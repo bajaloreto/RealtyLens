@@ -36,12 +36,12 @@ def load_model_from_registry(hook, database, schema, model_registry_table, model
         AND model_blob IS NOT NULL
         """
     else:
-        # Use the latest model
+        # Use the latest model - sort by model_version instead of created_at
         model_query = f"""
         SELECT model_version, model_blob, feature_info, r2
         FROM {database}.{schema}.{model_registry_table}
         WHERE model_blob IS NOT NULL
-        ORDER BY created_at DESC
+        ORDER BY model_version DESC
         LIMIT 1
         """
     
@@ -273,7 +273,7 @@ def predict_rent_prices(snowflake_conn_id, database, schema, model_registry_tabl
         prediction_results = pd.DataFrame({
             'LISTING_SK': listings_df['listing_sk'],
             'LISTING_ID': listings_df['listing_id'],
-            'SALE_PRICE': listings_df['sale_price'],å
+            'SALE_PRICE': listings_df['sale_price'],
             'PREDICTED_RENT_PRICE': listings_df['predicted_rent_price'],
             'RENT_TO_PRICE_RATIO': listings_df['rent_to_price_ratio'],
             'LOAD_DATE': listings_df['load_date'],
