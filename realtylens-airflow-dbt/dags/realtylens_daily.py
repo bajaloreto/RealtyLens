@@ -184,8 +184,7 @@ def simple_predict_rent_prices(snowflake_conn_id, database, schema, model_regist
         PREDICTED_RENT_PRICE FLOAT,
         RENT_TO_PRICE_RATIO FLOAT,
         LOAD_DATE DATE,
-        MODEL_VERSION VARCHAR,
-        PREDICTION_DATE TIMESTAMP_LTZ DEFAULT CURRENT_TIMESTAMP()
+        MODEL_VERSION VARCHAR
     )
     """)
     

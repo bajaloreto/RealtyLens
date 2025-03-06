@@ -265,8 +265,7 @@ def predict_rent_prices(snowflake_conn_id, database, schema, model_registry_tabl
             PREDICTED_RENT_PRICE FLOAT,
             RENT_TO_PRICE_RATIO FLOAT,
             LOAD_DATE DATE,
-            MODEL_VERSION VARCHAR,
-            PREDICTION_DATE TIMESTAMP_LTZ DEFAULT CURRENT_TIMESTAMP()
+            MODEL_VERSION VARCHAR
         )
         """)
         
@@ -274,7 +273,7 @@ def predict_rent_prices(snowflake_conn_id, database, schema, model_registry_tabl
         prediction_results = pd.DataFrame({
             'LISTING_SK': listings_df['listing_sk'],
             'LISTING_ID': listings_df['listing_id'],
-            'SALE_PRICE': listings_df['sale_price'],
+            'SALE_PRICE': listings_df['sale_price'],å
             'PREDICTED_RENT_PRICE': listings_df['predicted_rent_price'],
             'RENT_TO_PRICE_RATIO': listings_df['rent_to_price_ratio'],
             'LOAD_DATE': listings_df['load_date'],
