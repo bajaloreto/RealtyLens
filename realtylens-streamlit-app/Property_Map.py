@@ -604,15 +604,16 @@ def display_property_details(property_data):
         lon = property_data.get('LONGITUDE')
         
         if lat and lon and pd.notna(lat) and pd.notna(lon):
-            # Create a map centered on this property
-            property_map = folium.Map(location=[lat, lon], zoom_start=15, tiles="OpenStreetMap")
+            # Create a lightweight map centered on this property
+            property_map = folium.Map(
+                location=[lat, lon], 
+                zoom_start=15, 
+                tiles="OpenStreetMap",
+                prefer_canvas=True  # Better performance
+            )
             
             # Create a marker for this property
-            popup_html = f"""
-            <strong>{address}</strong><br>
-            ${price:,.0f}<br>
-            {beds} bed, {baths} bath, {sqft:,} sq ft
-            """
+            popup_html = f"<strong>{address}</strong><br>${price:,.0f}<br>{beds} bed, {baths} bath, {sqft:,} sq ft"
             
             folium.Marker(
                 [lat, lon],
@@ -621,8 +622,9 @@ def display_property_details(property_data):
                 icon=folium.Icon(color='red', icon='home', prefix='fa')
             ).add_to(property_map)
             
-            # Display the map
-            folium_static(property_map, width=1000, height=600)
+            # Display the map with optimized loading
+            with st.spinner("Loading property location..."):
+                folium_static(property_map, width=1000, height=600)
         else:
             st.warning("No location data available for this property")
         
