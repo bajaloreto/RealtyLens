@@ -771,32 +771,65 @@ def create_property_map(property_data, listing_type="sale"):
                         continue
                     
                     # Create color based on investment quality for sale properties
-                    color = 'blue'  # Default color
+                    bg_color = 'blue'  # Default color
+                    text_color = 'white'
                     
                     if listing_type == "sale" and 'RENT_TO_PRICE_RATIO' in prop and pd.notna(prop['RENT_TO_PRICE_RATIO']):
                         annual_yield = prop['RENT_TO_PRICE_RATIO'] * 12 * 100
                         
                         if annual_yield > 10:
-                            color = 'green'  # Excellent investment
+                            bg_color = 'green'  # Excellent investment
                         elif annual_yield > 8:
-                            color = 'lightgreen'  # Good investment
+                            bg_color = 'lightgreen'  # Good investment
+                            text_color = 'black'  # Better contrast on light background
                         elif annual_yield > 6:
-                            color = 'orange'  # Average investment
+                            bg_color = 'orange'  # Average investment
+                            text_color = 'black'  # Better contrast on light background
                         else:
-                            color = 'red'  # Below average investment
+                            bg_color = 'red'  # Below average investment
                     
                     # Get common property details
                     price = prop.get('PRICE', 0)
                     bedrooms = int(prop.get('BEDROOMS', 0)) if pd.notna(prop.get('BEDROOMS', 0)) else 0
                     bathrooms = prop.get('BATHROOMS', 0)
                     
+                    # Format price for display (shorter version)
+                    if price >= 1000000:
+                        display_price = f"${price/1000000:.1f}M"
+                    elif price >= 100000:
+                        display_price = f"${price/1000:.0f}K"
+                    else:
+                        display_price = f"${int(price)}"
+                    
                     # Create the popup HTML
                     popup_html = create_property_popup(prop, popup_style, listing_type, idx)
+                    
+                    # Create the price tag marker
+                    price_tag_html = f"""
+                    <div style="
+                        background-color: {bg_color}; 
+                        color: {text_color}; 
+                        border-radius: 4px; 
+                        padding: 3px 6px; 
+                        font-weight: bold; 
+                        font-size: 10px; 
+                        box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+                        text-align: center;
+                        min-width: 45px;
+                        line-height: 1.2;
+                    ">
+                        {display_price}
+                    </div>
+                    """
                     
                     # Add marker to map
                     folium.Marker(
                         [lat, lon],
-                        icon=folium.Icon(color=color, icon='home', prefix='fa'),
+                        icon=folium.DivIcon(
+                            html=price_tag_html,
+                            icon_size=(50, 20),
+                            icon_anchor=(25, 10),
+                        ),
                         popup=folium.Popup(popup_html, max_width=300),
                         tooltip=f"${price:,.0f} - {bedrooms} bed, {bathrooms} bath"
                     ).add_to(marker_cluster)
@@ -910,127 +943,72 @@ def create_property_popup(property_row, popup_style, listing_type, idx):
         # Return a simple popup on error
         return f"<div>Property at {property_row.get('FORMATTED_ADDRESS', 'Unknown')}</div>"
 
-def apply_filters(property_data):
+def apply_filters(data):
     """Apply user-selected filters to the property data"""
-    if property_data is None or property_data.empty:
-        return property_data
+    if data is None or data.empty:
+        return data
     
-    filtered_data = property_data.copy()
+    filtered_data = data.copy()
     
     # Price filter
-    min_price = st.sidebar.slider(
-        "Min Price", 
-        min_value=float(filtered_data['PRICE'].min()),
-        max_value=float(filtered_data['PRICE'].max()),
-        value=float(filtered_data['PRICE'].min()),
-        step=50000.0
-    )
-    
-    max_price = st.sidebar.slider(
-        "Max Price", 
-        min_value=float(filtered_data['PRICE'].min()),
-        max_value=float(filtered_data['PRICE'].max()),
-        value=float(filtered_data['PRICE'].max()),
-        step=50000.0
-    )
-    
-    filtered_data = filtered_data[(filtered_data['PRICE'] >= min_price) & 
-                                 (filtered_data['PRICE'] <= max_price)]
-    
-    # Bedrooms filter
-    if 'BEDROOMS' in filtered_data.columns:
-        # Filter out None values before sorting
-        valid_bedrooms = [b for b in filtered_data['BEDROOMS'].unique() if pd.notna(b)]
-        bedrooms = st.sidebar.multiselect(
-            "Bedrooms",
-            options=sorted(valid_bedrooms),
-            default=None
+    if 'PRICE' in filtered_data.columns:
+        min_price = float(filtered_data['PRICE'].min())
+        max_price = float(filtered_data['PRICE'].max())
+        
+        # Ensure min and max are different with a good margin
+        if min_price >= max_price:
+            min_price = min_price * 0.9  # Decrease min by 10%
+            max_price = max_price * 1.1  # Increase max by 10%
+        
+        # Round values for cleaner display
+        min_price = round(min_price / 1000) * 1000
+        max_price = round(max_price / 1000) * 1000
+        
+        price_range = st.sidebar.slider(
+            "Price Range",
+            min_value=float(min_price),
+            max_value=float(max_price),
+            value=(float(min_price), float(max_price)),
+            format="$%d",
+            step=1000.0
         )
         
-        if bedrooms:
-            filtered_data = filtered_data[filtered_data['BEDROOMS'].isin(bedrooms)]
+        # Only filter if the range has been changed from the default
+        if price_range != (min_price, max_price):
+            filtered_data = filtered_data[
+                (filtered_data['PRICE'] >= price_range[0]) &
+                (filtered_data['PRICE'] <= price_range[1])
+            ]
     
-    # Bathrooms filter
-    if 'BATHROOMS' in filtered_data.columns:
-        # Filter out None values before sorting
-        valid_bathrooms = [b for b in filtered_data['BATHROOMS'].unique() if pd.notna(b)]
-        
-        bathrooms = st.sidebar.multiselect(
-            "Bathrooms",
-            options=sorted(valid_bathrooms),
-            default=None
-        )
-        
-        if bathrooms:
-            filtered_data = filtered_data[filtered_data['BATHROOMS'].isin(bathrooms)]
-    
-    # Property type filter
+    # Property type filter (moved to top for better UX)
     if 'PROPERTY_TYPE' in filtered_data.columns:
-        # Filter out None values before sorting
-        valid_property_types = [pt for pt in filtered_data['PROPERTY_TYPE'].unique() if pd.notna(pt)]
-        
-        property_types = st.sidebar.multiselect(
-            "Property Type",
-            options=sorted(valid_property_types),
-            default=None
-        )
-        
-        if property_types:
-            filtered_data = filtered_data[filtered_data['PROPERTY_TYPE'].isin(property_types)]
+        property_types = filtered_data['PROPERTY_TYPE'].unique()
+        if len(property_types) > 0:
+            selected_types = st.sidebar.multiselect(
+                "Property Type",
+                options=property_types,
+                default=list(property_types)
+            )
+            
+            if selected_types:
+                filtered_data = filtered_data[filtered_data['PROPERTY_TYPE'].isin(selected_types)]
     
-    # Add investment filters only for sale properties
-    if 'RENT_TO_PRICE_RATIO' in filtered_data.columns and st.session_state.listing_type == "sale":
-        st.sidebar.markdown("### Investment Filters")
-        
-        # Calculate annual yield percentage for all properties
-        filtered_data['ANNUAL_YIELD'] = filtered_data['RENT_TO_PRICE_RATIO'] * 12 * 100
-        
-        # Get min and max yield values (handling NaN values)
-        non_na_yields = filtered_data['ANNUAL_YIELD'].dropna()
-        if not non_na_yields.empty:
-            min_yield = non_na_yields.min()
-            max_yield = non_na_yields.max()
-        else:
-            min_yield = 0
-            max_yield = 15
-        
-        # Add yield filter slider
+    # Investment yield filter (only for sale properties)
+    if 'RENT_TO_PRICE_RATIO' in filtered_data.columns:
         min_yield_filter = st.sidebar.slider(
-            "Min Annual Yield (%)", 
-            min_value=float(min_yield),
-            max_value=float(max_yield),
-            value=float(min_yield),
+            "Min Annual Yield (%)",
+            min_value=0.0,
+            max_value=15.0,
+            value=0.0,
             step=0.5
         )
         
-        # Apply investment filter
-        filtered_data = filtered_data[
-            (filtered_data['ANNUAL_YIELD'] >= min_yield_filter) | 
-            (filtered_data['ANNUAL_YIELD'].isna())
-        ]
-        
-        # Investment quality categories
-        investment_quality = st.sidebar.multiselect(
-            "Investment Quality",
-            options=["Excellent (>10%)", "Good (8-10%)", "Average (6-8%)", "Below Average (<6%)"],
-            default=None
-        )
-        
-        if investment_quality:
-            quality_mask = pd.Series(False, index=filtered_data.index)
-            
-            for quality in investment_quality:
-                if "Excellent" in quality:
-                    quality_mask = quality_mask | (filtered_data['ANNUAL_YIELD'] > 10)
-                elif "Good" in quality:
-                    quality_mask = quality_mask | ((filtered_data['ANNUAL_YIELD'] > 8) & (filtered_data['ANNUAL_YIELD'] <= 10))
-                elif "Average" in quality:
-                    quality_mask = quality_mask | ((filtered_data['ANNUAL_YIELD'] > 6) & (filtered_data['ANNUAL_YIELD'] <= 8))
-                elif "Below Average" in quality:
-                    quality_mask = quality_mask | (filtered_data['ANNUAL_YIELD'] <= 6)
-            
-            # Apply the quality mask, but also keep properties without yield data
-            filtered_data = filtered_data[quality_mask | filtered_data['ANNUAL_YIELD'].isna()]
+        if min_yield_filter > 0:
+            annual_yields = filtered_data['RENT_TO_PRICE_RATIO'] * 12 * 100
+            filtered_data = filtered_data[annual_yields >= min_yield_filter]
+    
+    # Add a count to show how many properties are being displayed
+    st.sidebar.write(f"Showing {len(filtered_data)} of {len(data)} properties")
     
     return filtered_data
 
@@ -1317,16 +1295,20 @@ def main():
     """Main Streamlit application"""
     st.title("🏠 RealtyLens: Real Estate Explorer")
     
-    # Fixed table options matching your schema
-    table_options = ["FCT_SALE_LISTING", "FCT_RENT_LISTING"]
+    # Fixed table options matching your schema with more readable names
+    table_options = {
+        "FCT_SALE_LISTING": "Properties For Sale",
+        "FCT_RENT_LISTING": "Properties For Rent"
+    }
     
     # Sidebar for filters and options
     st.sidebar.title("Options")
     
-    # Table selection - use the correct tables
+    # Table selection with readable names
     selected_table = st.sidebar.selectbox(
-        "Select Dataset:",
-        options=table_options,
+        "Select Market:",
+        options=list(table_options.keys()),
+        format_func=lambda x: table_options[x],
         index=0
     )
     

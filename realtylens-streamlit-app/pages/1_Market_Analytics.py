@@ -1,1453 +1,941 @@
 # Market Analytics Page for RealtyLens
 import streamlit as st
 import pandas as pd
-import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-import datetime
-import altair as alt
+import math
 
-# Import core functions from main app
-from Property_Map import query_snowflake, get_snowflake_connection, render_db_indicator
+# Import core functions from main app for Snowflake connection
+from Property_Map import query_snowflake, render_db_indicator
 
-# Page title
-st.title("📊 RealtyLens Market Insights")
-st.markdown("### Advanced Market Analytics for Property Investment Decisions")
+# Page configuration
+st.set_page_config(page_title="RealtyLens Market Analytics", page_icon="📊", layout="wide")
 
-# Sidebar filters
-st.sidebar.header("Filter Options")
-
-# Market type selection
-market_type = st.sidebar.radio(
-    "Market Type",
-    ["Rental Market", "Sales Market"]
-)
-
-# Date range filter
-today = datetime.datetime.now().date()
-one_year_ago = today - datetime.timedelta(days=365)
-
-date_range = st.sidebar.date_input(
-    "Date Range",
-    value=(one_year_ago, today)
-)
-
-# ZIP code filter (optional)
-zip_code = st.sidebar.text_input("ZIP Code (Optional)", "")
-
-# Define any missing functions
-def get_snowflake_connection():
-    # Implementation here
-    pass
-
-def render_db_indicator():
-    # Implementation here
-    pass
-
-# ======= HELPER FUNCTIONS =======
-def format_price(price, currency="$"):
-    """Format price with commas and currency symbol"""
-    if pd.isna(price):
-        return "N/A"
+def load_table_data(table_name):
+    """Load data from a specified table in Snowflake"""
     try:
-        return f"{currency}{int(float(price)):,}"
-    except:
-        return f"{currency}{price}"
+        query = f"SELECT * FROM DATAEXPERT_STUDENT.JMUSNI07.{table_name}"
+        data = query_snowflake(query)
+        return data
+    except Exception as e:
+        st.error(f"Error loading {table_name}: {str(e)}")
+        return None
 
-def format_percent(value):
-    """Format a decimal as a percentage"""
-    if pd.isna(value):
-        return "N/A"
-    try:
-        return f"{float(value) * 100:.1f}%"
-    except:
-        return f"{value}%"
-
-# ======= MARKET ANALYTICS DATA LOADING =======
-@st.cache_data(ttl=3600)
-def load_market_health_data(listing_type="rent"):
-    """Load market health data for rentals or sales"""
-    if listing_type == "rent":
-        query = """
-        SELECT *
-        FROM DATAEXPERT_STUDENT.JMUSNI07.RENT_MARKET_HEALTH_INDEX
-        ORDER BY DAY
-        """
-    else:
-        # For sales, we'll use the SALE_MARKET_TIMING_AND_SEASONALITY table
-        query = """
-        SELECT
-            YEAR_MONTH as DAY,
-            SUM(ACTIVE_LISTINGS) as TOTAL_LISTINGS,
-            SUM(NEW_LISTINGS) as NEW_LISTINGS,
-            SUM(LIKELY_SOLD) as LIKELY_SOLD,
-            AVG(AVG_LIST_PRICE) as AVG_PRICE,
-            AVG(AVG_DOM) as AVG_DAYS_ON_MARKET,
-            AVG(SEASONALITY_INDEX) as SEASONALITY_INDEX,
-            AVG(MARKET_VELOCITY) as MARKET_VELOCITY,
-            AVG(MONTHS_OF_INVENTORY) as MONTHS_OF_INVENTORY,
-            AVG(DISCOUNT_PRESSURE) as DISCOUNT_PRESSURE
-        FROM DATAEXPERT_STUDENT.JMUSNI07.SALE_MARKET_TIMING_AND_SEASONALITY
-        GROUP BY YEAR_MONTH
-        ORDER BY YEAR_MONTH
-        """
-    
-    data = query_snowflake(query)
-    return data
-
-@st.cache_data(ttl=3600)
-def load_price_market_analysis(listing_type="rent"):
-    """Load price market analysis data for rentals or sales"""
-    if listing_type == "rent":
-        table_name = "RENT_PRICE_MARKET_ANALYSIS"
-        price_col = "AVG_RENT_PRICE"
-    else:
-        table_name = "SALE_PRICE_MARKET_ANALYSIS"
-        price_col = "AVG_SALE_PRICE"
-    
-    query = f"""
-    SELECT
-        AGGREGATION_LEVEL,
-        PROPERTY_TYPE,
-        STATUS,
-        BEDROOMS,
-        LISTING_COUNT,
-        {price_col} as AVG_PRICE,
-        MIN_{listing_type.upper()}_PRICE as MIN_PRICE,
-        MAX_{listing_type.upper()}_PRICE as MAX_PRICE
-    FROM DATAEXPERT_STUDENT.JMUSNI07.{table_name}
-    ORDER BY LISTING_COUNT DESC
-    """
-    
-    data = query_snowflake(query)
-    return data
-
-@st.cache_data(ttl=3600)
-def load_lifecycle_data():
-    """Load rental lifecycle data"""
-    query = """
-    SELECT *
-    FROM DATAEXPERT_STUDENT.JMUSNI07.RENT_LIFECYCLE
-    ORDER BY SNAPSHOT_DATE DESC
-    """
-    
-    data = query_snowflake(query)
-    return data
-
-@st.cache_data(ttl=3600)
-def load_price_optimization_data(listing_type="rent"):
-    """Load price optimization data"""
-    if listing_type == "rent":
-        query = """
-        SELECT *
-        FROM DATAEXPERT_STUDENT.JMUSNI07.RENT_PRICE_OPTIMIZATION
-        ORDER BY SNAPSHOT_DATE DESC, PRICE_QUINTILE
-        """
-    else:
-        query = """
-        SELECT 
-            PRICE_SEGMENT,
-            DAYS_SEGMENT,
-            LISTING_COUNT,
-            LIKELY_SOLD_COUNT,
-            CONVERSION_RATE,
-            AVG_PRICE_ADJUSTMENT_PCT,
-            AVG_DAYS_TO_SELL,
-            MARKET_EFFICIENCY_SCORE,
-            SNAPSHOT_DATE
-        FROM DATAEXPERT_STUDENT.JMUSNI07.SALE_PRICE_ELASTICITY_AND_DISCOUNT_IMPACT
-        ORDER BY SNAPSHOT_DATE DESC, PRICE_SEGMENT
-        """
-    
-    data = query_snowflake(query)
-    return data
-
-@st.cache_data(ttl=3600)
-def load_seasonality_data():
-    """Load sales seasonality data"""
-    query = """
-    SELECT *
-    FROM DATAEXPERT_STUDENT.JMUSNI07.SALE_MARKET_TIMING_AND_SEASONALITY
-    ORDER BY YEAR_MONTH
-    """
-    
-    data = query_snowflake(query)
-    return data
-
-# ======= VISUALIZATION FUNCTIONS =======
-def plot_market_health_trends(df, listing_type="rent"):
-    """Plot market health trends for the given dataframe"""
-    if df.empty:
-        st.warning("No market trend data available for the selected filters.")
+def visualize_rent_lifecycle(data):
+    """Visualize rental property lifecycle stages"""
+    if data is None or data.empty:
+        st.warning("No data available for RENT_LIFECYCLE")
         return
     
-    # First, check what columns we actually have
-    available_cols = df.columns.tolist()
-    st.write(f"Available columns: {available_cols}")  # Debug info - remove later
+    # Sort by property count for better visualization
+    data = data.sort_values(by="PROPERTY_COUNT", ascending=False)
     
-    # Determine date column based on available columns
-    date_cols = [col for col in ['DAY', 'YEAR_MONTH', 'SNAPSHOT_DATE', 'DATE'] if col in available_cols]
-    if not date_cols:
-        st.error("No date column found in the data. Cannot display trends.")
-        return
+    # Create funnel chart
+    fig = px.funnel(
+        data,
+        x="PROPERTY_COUNT",
+        y="LIFECYCLE_STAGE",
+        title="Rental Property Lifecycle Funnel"
+    )
     
-    date_col = date_cols[0]  # Use the first available date column
+    # Add conversion rate as text
+    fig.update_traces(
+        texttemplate="<b>%{y}</b><br>%{x} properties<br>Conv. Rate: %{customdata[0]:.1%}",
+        customdata=data[["CONVERSION_RATE"]]
+    )
     
-    # Ensure date column is datetime
-    df[date_col] = pd.to_datetime(df[date_col])
+    st.plotly_chart(fig, use_container_width=True)
     
-    # Get the most recent data
-    latest = df.iloc[-1]
-    
-    # Identify days on market column
-    dom_cols = [col for col in ['AVG_DAYS_ON_MARKET', 'AVG_DOM', 'AVG_DAYS_TO_SELL', 'DOM'] if col in available_cols]
-    if not dom_cols:
-        st.warning("No days on market data available.")
-        dom_col = None
-    else:
-        dom_col = dom_cols[0]
-    
-    # Calculate historical average if we have days on market data
-    if dom_col and len(df) > 1:
-        # Convert to float to avoid Decimal issues
-        current_dom = float(latest[dom_col])
-        historical_avg = float(df[dom_col].mean())
-        
-        # Calculate percentage difference
-        if historical_avg > 0:
-            pct_diff = ((current_dom - historical_avg) / historical_avg) * 100
-        else:
-            pct_diff = 0
-    else:
-        pct_diff = 0
-        current_dom = 0
-        historical_avg = 0
-    
-    # Create metrics
-    col1, col2, col3 = st.columns(3)
-    
+    # Show additional metrics
+    col1, col2 = st.columns(2)
     with col1:
-        # Market health or inventory metric
-        if 'MARKET_HEALTH_SCORE' in available_cols:
-            health_score = float(latest['MARKET_HEALTH_SCORE'])
-            prev_score = float(df.iloc[-2]['MARKET_HEALTH_SCORE']) if len(df) > 1 else health_score
-            delta = health_score - prev_score
-            
-            st.metric(
-                "Market Health Score", 
-                f"{health_score:.1f}/10", 
-                f"{delta:+.1f}"
-            )
-        elif 'MONTHS_OF_INVENTORY' in available_cols:
-            moi = float(latest['MONTHS_OF_INVENTORY'])
-            prev_moi = float(df.iloc[-2]['MONTHS_OF_INVENTORY']) if len(df) > 1 else moi
-            delta = moi - prev_moi
-            
-            st.metric(
-                "Months of Inventory", 
-                f"{moi:.1f}", 
-                f"{delta:+.1f}",
-                delta_color="inverse"  # Lower is better for sellers
-            )
-        elif 'MARKET_VELOCITY' in available_cols:
-            velocity = float(latest['MARKET_VELOCITY'])
-            prev_velocity = float(df.iloc[-2]['MARKET_VELOCITY']) if len(df) > 1 else velocity
-            delta = velocity - prev_velocity
-            
-            st.metric(
-                "Market Velocity", 
-                f"{velocity:.2f}", 
-                f"{delta:+.2f}"
-            )
-        else:
-            st.metric("Market Status", "Data Available", "")
+        avg_days = data["AVG_DAYS_TO_CONVERSION"].mean()
+        st.metric("Average Days to Conversion", f"{avg_days:.1f} days")
     
     with col2:
-        # Days on market
-        if dom_col:
-            st.metric(
-                "Days on Market", 
-                f"{current_dom:.1f}", 
-                f"{pct_diff:+.1f}% vs avg",
-                delta_color="inverse"  # Lower is better
-            )
-        else:
-            st.metric("Days on Market", "N/A", "")
-    
-    with col3:
-        # Price metric - check for available price columns
-        price_cols = [col for col in ['AVG_PRICE', 'MEDIAN_PRICE', 'AVG_SALE_PRICE', 'AVG_LIST_PRICE'] 
-                     if col in available_cols]
-        
-        if price_cols:
-            price_col = price_cols[0]
-            current_price = float(latest[price_col])
-            prev_price = float(df.iloc[-2][price_col]) if len(df) > 1 else current_price
-            price_delta = ((current_price - prev_price) / prev_price * 100) if prev_price > 0 else 0
-            
-            price_label = "Avg Price" if "AVG" in price_col else "Median Price"
-            
-            st.metric(
-                price_label, 
-                f"${current_price:,.0f}", 
-                f"{price_delta:+.1f}%"
-            )
-        else:
-            st.metric("Price", "N/A", "")
-    
-    # Plot time series if we have enough data
-    if len(df) > 1:
-        st.subheader("Market Trends")
-        
-        # Create tabs for different metrics
-        tabs = []
-        tab_titles = []
-        
-        # First tab - always have health or inventory
-        if 'MARKET_HEALTH_SCORE' in available_cols:
-            tabs.append("Health Score")
-            tab_titles.append("Health Score")
-        elif 'MONTHS_OF_INVENTORY' in available_cols:
-            tabs.append("Inventory")
-            tab_titles.append("Inventory")
-        elif 'MARKET_VELOCITY' in available_cols:
-            tabs.append("Velocity")
-            tab_titles.append("Velocity")
-        
-        # Second tab - Days on Market
-        if dom_col:
-            tabs.append("Days on Market")
-            tab_titles.append("Days")
-        
-        # Third tab - Price Trends
-        if price_cols:
-            tabs.append("Price Trends")
-            tab_titles.append("Prices")
-        
-        # Add listing activity if available
-        if any(col in available_cols for col in ['NEW_LISTINGS', 'TOTAL_LISTINGS', 'ACTIVE_LISTINGS']):
-            tabs.append("Listings")
-            tab_titles.append("Listings")
-        
-        # Create the tabs
-        if tabs:
-            plot_tabs = st.tabs(tabs)
-            
-            # Fill the tabs with plots
-            for i, tab_name in enumerate(tab_titles):
-                with plot_tabs[i]:
-                    if tab_name == "Health Score" and 'MARKET_HEALTH_SCORE' in available_cols:
-                        plot_health_score(df, date_col)
-                    elif tab_name == "Inventory" and 'MONTHS_OF_INVENTORY' in available_cols:
-                        plot_inventory_trends(df, date_col)
-                    elif tab_name == "Velocity" and 'MARKET_VELOCITY' in available_cols:
-                        plot_velocity_trends(df, date_col)
-                    elif tab_name == "Days" and dom_col:
-                        plot_days_on_market(df, date_col, dom_col)
-                    elif tab_name == "Prices" and price_cols:
-                        plot_price_trends(df, date_col, price_cols[0])
-                    elif tab_name == "Listings":
-                        plot_listing_activity(df, date_col)
-        else:
-            st.info("Not enough data to display trend charts.")
+        price_drop_rate = data["PRICE_DROP_RATE"].mean()
+        st.metric("Average Price Drop Rate", f"{price_drop_rate:.1%}")
 
-# Add these helper functions for the plot_market_health_trends function
-
-def plot_health_score(df, date_col):
-    """Plot the market health score trend"""
-    fig = go.Figure()
-    
-    # Add market health score line
-    fig.add_trace(go.Scatter(
-        x=df[date_col],
-        y=df['MARKET_HEALTH_SCORE'].apply(lambda x: float(x)),
-        mode='lines+markers',
-        name='Market Health Score',
-        line=dict(color='#4CAF50', width=3),
-        hovertemplate='Date: %{x|%b %d, %Y}<br>Health Score: %{y:.1f}/10<extra></extra>'
-    ))
-    
-    # Add reference line at 5.0 (neutral market)
-    fig.add_shape(
-        type="line",
-        x0=df[date_col].min(),
-        x1=df[date_col].max(),
-        y0=5.0,
-        y1=5.0,
-        line=dict(color="gray", width=1, dash="dash")
-    )
-    
-    # Add annotations for market conditions
-    fig.add_annotation(
-        x=df[date_col].max(),
-        y=8.5,
-        text="Landlord's Market",
-        showarrow=False,
-        font=dict(color="#4CAF50")
-    )
-    
-    fig.add_annotation(
-        x=df[date_col].max(),
-        y=1.5,
-        text="Renter's Market",
-        showarrow=False,
-        font=dict(color="#F44336")
-    )
-    
-    # Update layout
-    fig.update_layout(
-        xaxis_title="Date",
-        yaxis_title="Market Health Score (0-10)",
-        yaxis=dict(range=[0, 10]),
-        height=400,
-        margin=dict(l=40, r=40, t=20, b=40)
-    )
-    
-    st.plotly_chart(fig, use_container_width=True)
-
-def plot_inventory_trends(df, date_col):
-    """Plot months of inventory trend"""
-    fig = go.Figure()
-    
-    # Add inventory line
-    fig.add_trace(go.Scatter(
-        x=df[date_col],
-        y=df['MONTHS_OF_INVENTORY'].apply(lambda x: float(x)),
-        mode='lines+markers',
-        name='Months of Inventory',
-        line=dict(color='#2196F3', width=3),
-        hovertemplate='Date: %{x|%b %d, %Y}<br>Months of Inventory: %{y:.1f}<extra></extra>'
-    ))
-    
-    # Add reference lines for market conditions
-    fig.add_shape(
-        type="line",
-        x0=df[date_col].min(),
-        x1=df[date_col].max(),
-        y0=3.0,
-        y1=3.0,
-        line=dict(color="#4CAF50", width=1, dash="dash")
-    )
-    
-    fig.add_shape(
-        type="line",
-        x0=df[date_col].min(),
-        x1=df[date_col].max(),
-        y0=6.0,
-        y1=6.0,
-        line=dict(color="#F44336", width=1, dash="dash")
-    )
-    
-    # Add annotations for market conditions
-    fig.add_annotation(
-        x=df[date_col].max(),
-        y=1.5,
-        text="Seller's Market",
-        showarrow=False,
-        font=dict(color="#4CAF50")
-    )
-    
-    fig.add_annotation(
-        x=df[date_col].max(),
-        y=4.5,
-        text="Balanced Market",
-        showarrow=False,
-        font=dict(color="#FFB300")
-    )
-    
-    fig.add_annotation(
-        x=df[date_col].max(),
-        y=7.5,
-        text="Buyer's Market",
-        showarrow=False,
-        font=dict(color="#F44336")
-    )
-    
-    # Update layout
-    fig.update_layout(
-        xaxis_title="Date",
-        yaxis_title="Months of Inventory",
-        height=400,
-        margin=dict(l=40, r=40, t=20, b=40)
-    )
-    
-    st.plotly_chart(fig, use_container_width=True)
-
-def plot_velocity_trends(df, date_col):
-    """Plot market velocity trend"""
-    fig = go.Figure()
-    
-    # Add velocity line
-    fig.add_trace(go.Scatter(
-        x=df[date_col],
-        y=df['MARKET_VELOCITY'].apply(lambda x: float(x)),
-        mode='lines+markers',
-        name='Market Velocity',
-        line=dict(color='#673AB7', width=3),
-        hovertemplate='Date: %{x|%b %d, %Y}<br>Market Velocity: %{y:.2f}<extra></extra>'
-    ))
-    
-    # Update layout
-    fig.update_layout(
-        xaxis_title="Date",
-        yaxis_title="Market Velocity",
-        height=400,
-        margin=dict(l=40, r=40, t=20, b=40)
-    )
-    
-    st.plotly_chart(fig, use_container_width=True)
-
-def plot_days_on_market(df, date_col, dom_col):
-    """Plot days on market trend"""
-    fig = go.Figure()
-    
-    # Add days on market line
-    fig.add_trace(go.Scatter(
-        x=df[date_col],
-        y=df[dom_col].apply(lambda x: float(x)),
-        mode='lines+markers',
-        name='Days on Market',
-        line=dict(color='#FF9800', width=3),
-        hovertemplate='Date: %{x|%b %d, %Y}<br>Days on Market: %{y:.1f}<extra></extra>'
-    ))
-    
-    # Add historical average reference line
-    historical_avg = float(df[dom_col].mean())
-    
-    fig.add_shape(
-        type="line",
-        x0=df[date_col].min(),
-        x1=df[date_col].max(),
-        y0=historical_avg,
-        y1=historical_avg,
-        line=dict(color="gray", width=1, dash="dash")
-    )
-    
-    fig.add_annotation(
-        x=df[date_col].max(),
-        y=historical_avg,
-        text=f"Historical Avg: {historical_avg:.1f}",
-        showarrow=False,
-        yshift=10,
-        font=dict(color="gray")
-    )
-    
-    # Update layout
-    fig.update_layout(
-        xaxis_title="Date",
-        yaxis_title="Days on Market",
-        height=400,
-        margin=dict(l=40, r=40, t=20, b=40)
-    )
-    
-    st.plotly_chart(fig, use_container_width=True)
-
-def plot_price_trends(df, date_col, price_col):
-    """Plot price trend"""
-    fig = go.Figure()
-    
-    # Add price line
-    fig.add_trace(go.Scatter(
-        x=df[date_col],
-        y=df[price_col].apply(lambda x: float(x)),
-        mode='lines+markers',
-        name=price_col.replace('_', ' ').title(),
-        line=dict(color='#E91E63', width=3),
-        hovertemplate='Date: %{x|%b %d, %Y}<br>Price: $%{y:,.0f}<extra></extra>'
-    ))
-    
-    # Update layout
-    fig.update_layout(
-        xaxis_title="Date",
-        yaxis_title="Price ($)",
-        height=400,
-        margin=dict(l=40, r=40, t=20, b=40)
-    )
-    
-    st.plotly_chart(fig, use_container_width=True)
-
-def plot_listing_activity(df, date_col):
-    """Plot listing activity"""
-    fig = go.Figure()
-    
-    # Determine which columns we have
-    cols = df.columns
-    
-    if 'TOTAL_LISTINGS' in cols or 'ACTIVE_LISTINGS' in cols:
-        total_col = 'TOTAL_LISTINGS' if 'TOTAL_LISTINGS' in cols else 'ACTIVE_LISTINGS'
-        fig.add_trace(go.Scatter(
-            x=df[date_col],
-            y=df[total_col].apply(lambda x: float(x)),
-            mode='lines',
-            name='Total Listings',
-            line=dict(color='#2196F3', width=2)
-        ))
-    
-    if 'NEW_LISTINGS' in cols:
-        fig.add_trace(go.Bar(
-            x=df[date_col],
-            y=df['NEW_LISTINGS'].apply(lambda x: float(x)),
-            name='New Listings',
-            marker_color='#4CAF50'
-        ))
-    
-    if 'CHURNED_LISTINGS' in cols:
-        fig.add_trace(go.Bar(
-            x=df[date_col],
-            y=df['CHURNED_LISTINGS'].apply(lambda x: float(x)),
-            name='Churned Listings',
-            marker_color='#F44336'
-        ))
-    
-    # Update layout
-    fig.update_layout(
-        xaxis_title="Date",
-        yaxis_title="Number of Listings",
-        height=400,
-        margin=dict(l=40, r=40, t=20, b=40)
-    )
-    
-    st.plotly_chart(fig, use_container_width=True)
-
-def display_price_analysis(price_data, listing_type="rent"):
-    """Display price analysis by property type, bedrooms, etc."""
-    if price_data.empty:
-        st.warning("No price analysis data available")
+def visualize_rent_market_health(data):
+    """Visualize rental market health over time"""
+    if data is None or data.empty:
+        st.warning("No data available for RENT_MARKET_HEALTH_INDEX")
         return
     
-    st.subheader(f"{'Rental' if listing_type=='rent' else 'Sales'} Price Analysis")
+    # Sort data by date in ascending order
+    data = data.sort_values(by="DAY", ascending=True)
     
-    # Create a filter for aggregation level
-    aggregation_levels = price_data['AGGREGATION_LEVEL'].unique().tolist()
-    selected_agg = st.selectbox(
-        "Segmentation Level",
-        options=aggregation_levels,
-        index=0 if 'PROPERTY_TYPE' in aggregation_levels else 0
-    )
+    # Convert DAY column to datetime if it's not already
+    if not pd.api.types.is_datetime64_any_dtype(data["DAY"]):
+        data["DAY"] = pd.to_datetime(data["DAY"])
     
-    # Filter data by selected aggregation level
-    filtered_data = price_data[price_data['AGGREGATION_LEVEL'] == selected_agg]
+    # Convert decimal columns to float to avoid type errors
+    numeric_columns = ["MARKET_HEALTH_SCORE", "AVG_DAYS_ON_MARKET", "TOTAL_LISTINGS", 
+                       "NEW_LISTING_RATE", "PRICE_CHANGE_PCT", "PRICE_INCREASE_RATE", 
+                       "PRICE_DECREASE_RATE", "SUPPLY_DEMAND_RATIO"]
     
-    # Create visualization based on the aggregation type
-    if selected_agg == 'PROPERTY_TYPE':
-        # Bar chart by property type
-        if 'PROPERTY_TYPE' in filtered_data.columns:
-            fig = px.bar(
-                filtered_data,
-                x='PROPERTY_TYPE',
-                y='AVG_PRICE',
-                color='PROPERTY_TYPE',
-                title=f"Average Price by Property Type",
-                labels={'AVG_PRICE': 'Average Price ($)', 'PROPERTY_TYPE': 'Property Type'},
-                hover_data=['LISTING_COUNT', 'MIN_PRICE', 'MAX_PRICE']
-            )
-            
-            fig.update_layout(
-                xaxis_title='',
-                yaxis_title='Average Price ($)',
-                showlegend=False,
-                margin=dict(l=40, r=40, t=60, b=40),
-                height=500
-            )
-            
-            # Add price range as error bars
-            fig.update_traces(
-                error_y=dict(
-                    type='data',
-                    symmetric=False,
-                    array=filtered_data['MAX_PRICE'] - filtered_data['AVG_PRICE'],
-                    arrayminus=filtered_data['AVG_PRICE'] - filtered_data['MIN_PRICE']
-                )
-            )
-            
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # Show data table with key metrics
-            display_df = filtered_data[['PROPERTY_TYPE', 'LISTING_COUNT', 'AVG_PRICE', 'MIN_PRICE', 'MAX_PRICE']].copy()
-            display_df['AVG_PRICE'] = display_df['AVG_PRICE'].apply(lambda x: f"${x:,.0f}")
-            display_df['MIN_PRICE'] = display_df['MIN_PRICE'].apply(lambda x: f"${x:,.0f}")
-            display_df['MAX_PRICE'] = display_df['MAX_PRICE'].apply(lambda x: f"${x:,.0f}")
-            display_df.columns = ['Property Type', 'Listing Count', 'Average Price', 'Minimum Price', 'Maximum Price']
-            
-            st.dataframe(display_df, use_container_width=True)
+    for col in numeric_columns:
+        if col in data.columns:
+            data[col] = data[col].astype(float)
     
-    elif selected_agg == 'BEDROOMS':
-        # Line chart by number of bedrooms
-        if 'BEDROOMS' in filtered_data.columns:
-            # Ensure proper sorting order by converting to numeric
-            filtered_data['BEDROOMS_NUM'] = pd.to_numeric(filtered_data['BEDROOMS'], errors='coerce')
-            filtered_data = filtered_data.sort_values('BEDROOMS_NUM')
-            
-            fig = px.line(
-                filtered_data,
-                x='BEDROOMS',
-                y='AVG_PRICE',
-                markers=True,
-                title=f"Average Price by Number of Bedrooms",
-                labels={'AVG_PRICE': 'Average Price ($)', 'BEDROOMS': 'Bedrooms'},
-                line_shape='linear',
-                color_discrete_sequence=['#1E88E5']
-            )
-            
-            # Add price range as a shaded area
-            fig.add_trace(
-                go.Scatter(
-                    x=filtered_data['BEDROOMS'],
-                    y=filtered_data['MAX_PRICE'],
-                    mode='lines',
-                    line=dict(width=0),
-                    showlegend=False
-                )
-            )
-            
-            fig.add_trace(
-                go.Scatter(
-                    x=filtered_data['BEDROOMS'],
-                    y=filtered_data['MIN_PRICE'],
-                    mode='lines',
-                    line=dict(width=0),
-                    fill='tonexty',
-                    fillcolor='rgba(30, 136, 229, 0.2)',
-                    showlegend=False
-                )
-            )
-            
-            fig.update_layout(
-                xaxis_title='Number of Bedrooms',
-                yaxis_title='Average Price ($)',
-                margin=dict(l=40, r=40, t=60, b=40),
-                height=500
-            )
-            
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # Display data table
-            display_df = filtered_data[['BEDROOMS', 'LISTING_COUNT', 'AVG_PRICE', 'MIN_PRICE', 'MAX_PRICE']].copy()
-            display_df['AVG_PRICE'] = display_df['AVG_PRICE'].apply(lambda x: f"${x:,.0f}")
-            display_df['MIN_PRICE'] = display_df['MIN_PRICE'].apply(lambda x: f"${x:,.0f}")
-            display_df['MAX_PRICE'] = display_df['MAX_PRICE'].apply(lambda x: f"${x:,.0f}")
-            display_df.columns = ['Bedrooms', 'Listing Count', 'Average Price', 'Minimum Price', 'Maximum Price']
-            
-            st.dataframe(display_df, use_container_width=True)
+    # Calculate safe max values to avoid errors
+    max_health = float(data["MARKET_HEALTH_SCORE"].max()) * 1.1
+    max_days = float(data["AVG_DAYS_ON_MARKET"].max()) * 1.1
+    max_listings = float(data["TOTAL_LISTINGS"].max()) * 1.1
     
-    elif selected_agg == 'STATUS':
-        # Bar chart by property status
-        if 'STATUS' in filtered_data.columns:
-            fig = px.bar(
-                filtered_data,
-                x='STATUS',
-                y='AVG_PRICE',
-                color='STATUS',
-                title=f"Average Price by Property Status",
-                labels={'AVG_PRICE': 'Average Price ($)', 'STATUS': 'Status'},
-                hover_data=['LISTING_COUNT', 'MIN_PRICE', 'MAX_PRICE']
-            )
-            
-            fig.update_layout(
-                xaxis_title='',
-                yaxis_title='Average Price ($)',
-                showlegend=False,
-                margin=dict(l=40, r=40, t=60, b=40),
-                height=500
-            )
-            
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # Display data table
-            display_df = filtered_data[['STATUS', 'LISTING_COUNT', 'AVG_PRICE', 'MIN_PRICE', 'MAX_PRICE']].copy()
-            display_df['AVG_PRICE'] = display_df['AVG_PRICE'].apply(lambda x: f"${x:,.0f}")
-            display_df['MIN_PRICE'] = display_df['MIN_PRICE'].apply(lambda x: f"${x:,.0f}")
-            display_df['MAX_PRICE'] = display_df['MAX_PRICE'].apply(lambda x: f"${x:,.0f}")
-            display_df.columns = ['Status', 'Listing Count', 'Average Price', 'Minimum Price', 'Maximum Price']
-            
-            st.dataframe(display_df, use_container_width=True)
+    # Create time series for market health
+    fig = go.Figure()
     
-    # Add a note about the data
-    st.caption(f"Data shows average prices across {len(filtered_data)} different segments.")
-
-def display_rental_lifecycle(lifecycle_data):
-    """Display rental property lifecycle analysis"""
-    if lifecycle_data.empty:
-        st.warning("No rental lifecycle data available")
-        return
-    
-    st.subheader("Rental Property Lifecycle Analysis")
-    
-    # Get the most recent snapshot date
-    latest_date = lifecycle_data['SNAPSHOT_DATE'].max()
-    latest_data = lifecycle_data[lifecycle_data['SNAPSHOT_DATE'] == latest_date]
-    
-    # Create a funnel chart for the lifecycle stages
-    stages = ['NEW', 'ACTIVE', 'PENDING', 'RENTED']
-    stage_data = []
-    
-    for stage in stages:
-        stage_row = latest_data[latest_data['LIFECYCLE_STAGE'] == stage]
-        if not stage_row.empty:
-            stage_data.append(stage_row['PROPERTY_COUNT'].iloc[0])
-        else:
-            stage_data.append(0)
-    
-    fig = go.Figure(go.Funnel(
-        y=stages,
-        x=stage_data,
-        textinfo="value+percent initial",
-        marker={"color": ["#4CAF50", "#2196F3", "#FF9800", "#9C27B0"]}
+    # Add health score
+    fig.add_trace(go.Scatter(
+        x=data["DAY"],
+        y=data["MARKET_HEALTH_SCORE"],
+        name="Market Health Score",
+        line=dict(color="green", width=3),
+        hovertemplate="Date: %{x|%Y-%m-%d}<br>Health Score: %{y:.2f}<extra></extra>"
     ))
     
+    # Add days on market
+    fig.add_trace(go.Scatter(
+        x=data["DAY"],
+        y=data["AVG_DAYS_ON_MARKET"],
+        name="Avg Days on Market",
+        line=dict(color="orange", width=2),
+        yaxis="y2",
+        hovertemplate="Date: %{x|%Y-%m-%d}<br>Avg Days: %{y:.1f} days<extra></extra>"
+    ))
+    
+    # Add total listings as a third trace
+    fig.add_trace(go.Scatter(
+        x=data["DAY"],
+        y=data["TOTAL_LISTINGS"],
+        name="Total Listings",
+        line=dict(color="blue", width=1, dash="dot"),
+        yaxis="y3",
+        hovertemplate="Date: %{x|%Y-%m-%d}<br>Listings: %{y:,}<extra></extra>"
+    ))
+    
+    # Update layout with better formatting
     fig.update_layout(
-        title={
-            'text': "Rental Property Funnel",
-            'y': 0.95,
-            'x': 0.5,
-            'xanchor': 'center',
-            'yanchor': 'top'
-        },
-        margin=dict(l=40, r=40, t=80, b=40),
-        height=400
+        title="Rental Market Health Trends Over Time",
+        xaxis=dict(
+            title="Date",
+            tickformat="%b %d, %Y"
+        ),
+        yaxis=dict(
+            title="Market Health Score",
+            side="left",
+            range=[0, max_health]
+        ),
+        yaxis2=dict(
+            title="Avg Days on Market",
+            overlaying="y",
+            side="right",
+            range=[0, max_days]
+        ),
+        yaxis3=dict(
+            title="Total Listings",
+            overlaying="y",
+            side="right",
+            position=0.9,
+            anchor="free",
+            range=[0, max_listings]
+        ),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        ),
+        margin=dict(l=50, r=100, t=80, b=50),
+        hovermode="x unified"
     )
     
     st.plotly_chart(fig, use_container_width=True)
     
-    # Create metrics for key lifecycle statistics
-    st.subheader("Lifecycle Metrics")
-    
-    # Create a 3-column layout
-    col1, col2, col3 = st.columns(3)
-    
-    # Conversion rate
-    with col1:
-        # Find the conversion rate from NEW to RENTED
-        conversion_data = latest_data[latest_data['LIFECYCLE_STAGE'].isin(['RENTED'])]
-        if not conversion_data.empty:
-            conversion_rate = conversion_data['CONVERSION_RATE'].iloc[0]
-            st.metric("Overall Conversion Rate", f"{conversion_rate * 100:.1f}%")
-            
-            # Interpretation
-            if conversion_rate > 0.6:
-                st.write("High conversion rate indicates strong market demand")
-            elif conversion_rate < 0.4:
-                st.write("Low conversion rate suggests potential pricing issues")
-            else:
-                st.write("Average conversion rate for the current market")
-    
-    # Price drop rate
-    with col2:
-        price_drop_data = latest_data[latest_data['LIFECYCLE_STAGE'].isin(['ACTIVE', 'PENDING'])]
-        if not price_drop_data.empty:
-            avg_price_drop = price_drop_data['PRICE_DROP_RATE'].mean()
-            st.metric("Price Drop Rate", f"{avg_price_drop * 100:.1f}%")
-            
-            # Interpretation
-            if avg_price_drop > 0.3:
-                st.write("High price drop rate indicates initial overpricing")
-            elif avg_price_drop < 0.1:
-                st.write("Low price drop rate suggests accurate initial pricing")
-            else:
-                st.write("Moderate price adjustments in line with market expectations")
-    
-    # Days to conversion
-    with col3:
-        days_data = latest_data[latest_data['LIFECYCLE_STAGE'].isin(['RENTED'])]
-        if not days_data.empty:
-            avg_days = days_data['AVG_DAYS_TO_CONVERSION'].iloc[0]
-            st.metric("Avg Days to Rent", f"{avg_days:.1f} days")
-            
-            # Interpretation
-            if avg_days < 14:
-                st.write("Properties are renting quickly in this market")
-            elif avg_days > 30:
-                st.write("Longer than average time to rent")
-            else:
-                st.write("Average rental timeline for the current market")
-    
-    # Show the data table with all lifecycle statistics
-    with st.expander("View Detailed Lifecycle Statistics"):
-        display_df = latest_data.copy()
-        display_df['CONVERSION_RATE'] = display_df['CONVERSION_RATE'].apply(lambda x: f"{x * 100:.1f}%")
-        display_df['PRICE_DROP_RATE'] = display_df['PRICE_DROP_RATE'].apply(lambda x: f"{x * 100:.1f}%")
-        display_df['AVG_DAYS_TO_CONVERSION'] = display_df['AVG_DAYS_TO_CONVERSION'].apply(lambda x: f"{x:.1f} days")
-        display_df.columns = [col.replace('_', ' ').title() for col in display_df.columns]
+    # Show latest metrics
+    if len(data) > 0:
+        latest = data.iloc[-1]  # Get the most recent data point
+        prev = data.iloc[-2] if len(data) > 1 else None  # Get previous data point if available
         
-        st.dataframe(display_df, use_container_width=True)
-
-def display_price_optimization(opt_data, listing_type="rent"):
-    """Display price optimization insights"""
-    if opt_data.empty:
-        st.warning("No price optimization data available")
-        return
-    
-    st.subheader(f"{'Rental' if listing_type=='rent' else 'Sales'} Price Optimization")
-    
-    if listing_type == "rent":
-        # For rentals, use the RENT_PRICE_OPTIMIZATION table
+        st.subheader("Latest Market Indicators")
         
-        # Get the most recent snapshot date
-        latest_date = opt_data['SNAPSHOT_DATE'].max()
-        latest_data = opt_data[opt_data['SNAPSHOT_DATE'] == latest_date]
-        
-        # Create a plot showing conversion rate by price quintile
-        fig = px.bar(
-            latest_data,
-            x='PRICE_QUINTILE',
-            y='CONVERSION_RATE',
-            color='PRICE_STRATEGY',
-            title="Conversion Rate by Price Quintile and Strategy",
-            labels={
-                'PRICE_QUINTILE': 'Price Quintile (1=Lowest, 5=Highest)',
-                'CONVERSION_RATE': 'Conversion Rate',
-                'PRICE_STRATEGY': 'Price Strategy'
-            },
-            color_discrete_map={
-                'Underpriced': '#4CAF50',
-                'Optimal': '#2196F3',
-                'Overpriced': '#F44336'
-            },
-            barmode='group'
-        )
-        
-        fig.update_layout(
-            xaxis_title='Price Quintile',
-            yaxis_title='Conversion Rate',
-            yaxis_tickformat='.0%',
-            margin=dict(l=40, r=40, t=60, b=40),
-            height=400
-        )
-        
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Create a second chart showing days on market by price quintile
-        fig2 = px.line(
-            latest_data,
-            x='PRICE_QUINTILE',
-            y='AVG_DAYS_ON_MARKET',
-            color='PRICE_STRATEGY',
-            title="Days on Market by Price Quintile and Strategy",
-            labels={
-                'PRICE_QUINTILE': 'Price Quintile (1=Lowest, 5=Highest)',
-                'AVG_DAYS_ON_MARKET': 'Average Days on Market',
-                'PRICE_STRATEGY': 'Price Strategy'
-            },
-            color_discrete_map={
-                'Underpriced': '#4CAF50',
-                'Optimal': '#2196F3',
-                'Overpriced': '#F44336'
-            },
-            markers=True
-        )
-        
-        fig2.update_layout(
-            xaxis_title='Price Quintile',
-            yaxis_title='Average Days on Market',
-            margin=dict(l=40, r=40, t=60, b=40),
-            height=400
-        )
-        
-        st.plotly_chart(fig2, use_container_width=True)
-        
-        # Key insights
-        st.subheader("Pricing Strategy Insights")
-        
-        # Calculate average metrics for each strategy
-        strategy_metrics = latest_data.groupby('PRICE_STRATEGY').agg({
-            'CONVERSION_RATE': 'mean',
-            'AVG_DAYS_ON_MARKET': 'mean',
-            'AVG_PRICE_ADJUSTMENT_PCT': 'mean'
-        }).reset_index()
-        
-        # Create metrics in 3 columns
+        # Create three columns for metrics
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            # Find the strategy with highest conversion rate
-            best_conv = strategy_metrics.loc[strategy_metrics['CONVERSION_RATE'].idxmax()]
-            st.metric(
-                "Best Strategy for Fast Rental", 
-                best_conv['PRICE_STRATEGY'],
-                f"{best_conv['CONVERSION_RATE']*100:.1f}% conversion rate"
-            )
+            delta = None
+            if prev is not None:
+                delta = float(latest['MARKET_HEALTH_SCORE']) - float(prev['MARKET_HEALTH_SCORE'])
+            
+            st.metric("Market Health Score", 
+                     f"{float(latest['MARKET_HEALTH_SCORE']):.2f}",
+                     f"{delta:.2f}" if delta is not None else None)
         
         with col2:
-            # Find the strategy with lowest days on market
-            best_dom = strategy_metrics.loc[strategy_metrics['AVG_DAYS_ON_MARKET'].idxmin()]
-            st.metric(
-                "Best Strategy for Minimum Time", 
-                best_dom['PRICE_STRATEGY'],
-                f"{best_dom['AVG_DAYS_ON_MARKET']:.1f} days on market"
-            )
+            delta = None
+            if prev is not None:
+                delta = -(float(latest['AVG_DAYS_ON_MARKET']) - float(prev['AVG_DAYS_ON_MARKET']))  # Negative change is good
+            
+            st.metric("Avg Days on Market", 
+                     f"{float(latest['AVG_DAYS_ON_MARKET']):.1f} days",
+                     f"{delta:.1f} days" if delta is not None else None)
         
         with col3:
-            # Find the strategy with lowest price adjustment
-            best_adj = strategy_metrics.loc[strategy_metrics['AVG_PRICE_ADJUSTMENT_PCT'].idxmin()]
-            st.metric(
-                "Best Strategy for Price Stability", 
-                best_adj['PRICE_STRATEGY'],
-                f"{abs(best_adj['AVG_PRICE_ADJUSTMENT_PCT'])*100:.1f}% price adjustment"
-            )
+            delta_percent = None
+            if prev is not None and float(prev['TOTAL_LISTINGS']) > 0:
+                delta_percent = (float(latest['TOTAL_LISTINGS']) - float(prev['TOTAL_LISTINGS'])) / float(prev['TOTAL_LISTINGS']) * 100
+            
+            st.metric("Total Listings", 
+                     f"{int(latest['TOTAL_LISTINGS']):,}",
+                     f"{delta_percent:.1f}%" if delta_percent is not None else None)
+        
+        # Second row of metrics
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.metric("New Listing Rate", 
+                     f"{float(latest['NEW_LISTING_RATE']):.1%}")
+        
+        with col2:
+            st.metric("Price Change", 
+                     f"{float(latest['PRICE_CHANGE_PCT']):.1%}",
+                     f"{float(latest['PRICE_INCREASE_RATE']) - float(latest['PRICE_DECREASE_RATE']):.1%}")
+        
+        with col3:
+            st.metric("Supply/Demand Ratio", 
+                     f"{float(latest['SUPPLY_DEMAND_RATIO']):.2f}",
+                     "Higher = more supply")
+
+def visualize_price_market_analysis(data, market_type="rental"):
+    """Visualize price market analysis for either rental or sales market"""
+    if data is None or data.empty:
+        st.warning(f"No data available for {market_type.upper()}_PRICE_MARKET_ANALYSIS")
+        return
+    
+    # Set appropriate column names based on market type
+    price_col = "AVG_RENT_PRICE" if market_type == "rental" else "AVG_SALE_PRICE"
+    min_price_col = "MIN_RENT_PRICE" if market_type == "rental" else "MIN_SALE_PRICE"
+    max_price_col = "MAX_RENT_PRICE" if market_type == "rental" else "MAX_SALE_PRICE"
+    
+    # Filter controls
+    agg_levels = sorted(data["AGGREGATION_LEVEL"].unique())
+    selected_agg = st.selectbox(
+        "Select Aggregation Level",
+        agg_levels,
+        key=f"{market_type}_price_agg"
+    )
+    
+    # Filter data
+    filtered_data = data[data["AGGREGATION_LEVEL"] == selected_agg].copy()
+    
+    if filtered_data.empty:
+        st.warning(f"No data available for {selected_agg} aggregation level")
+        return
+    
+    # Handle different aggregation levels
+    if selected_agg == "property_type":
+        x_col = "PROPERTY_TYPE"
+        title = f"Average {'Rent' if market_type == 'rental' else 'Sale'} Price by Property Type"
+    
+    elif selected_agg == "status":
+        x_col = "STATUS"
+        title = f"Average {'Rent' if market_type == 'rental' else 'Sale'} Price by Status"
+    
+    elif selected_agg == "bedrooms":
+        x_col = "BEDROOMS"
+        title = f"Average {'Rent' if market_type == 'rental' else 'Sale'} Price by Bedroom Count"
+    
+    elif selected_agg == "property_type__status":
+        # Create combined label for property type and status
+        filtered_data["LABEL"] = filtered_data["PROPERTY_TYPE"] + " - " + filtered_data["STATUS"]
+        x_col = "LABEL"
+        title = f"Average {'Rent' if market_type == 'rental' else 'Sale'} Price by Property Type and Status"
+    
+    elif selected_agg == "property_type__bedrooms":
+        # Create combined label for property type and bedrooms
+        filtered_data["LABEL"] = filtered_data["PROPERTY_TYPE"] + " - " + filtered_data["BEDROOMS"] + " BR"
+        x_col = "LABEL"
+        title = f"Average {'Rent' if market_type == 'rental' else 'Sale'} Price by Property Type and Bedrooms"
+    
+    elif selected_agg == "status__bedrooms":
+        # Create combined label for status and bedrooms
+        filtered_data["LABEL"] = filtered_data["STATUS"] + " - " + filtered_data["BEDROOMS"] + " BR"
+        x_col = "LABEL"
+        title = f"Average {'Rent' if market_type == 'rental' else 'Sale'} Price by Status and Bedrooms"
+    
+    elif selected_agg == "property_type__status__bedrooms":
+        # Create combined label for all three dimensions
+        filtered_data["LABEL"] = filtered_data["PROPERTY_TYPE"] + " - " + filtered_data["STATUS"] + " - " + filtered_data["BEDROOMS"] + " BR"
+        x_col = "LABEL"
+        title = f"Average {'Rent' if market_type == 'rental' else 'Sale'} Price by Property Type, Status, and Bedrooms"
+    
+    elif selected_agg == "overall":
+        # For overall, create a simpler visualization
+        overall_price = filtered_data[price_col].values[0]
+        overall_min = filtered_data[min_price_col].values[0]
+        overall_max = filtered_data[max_price_col].values[0]
+        listing_count = filtered_data["LISTING_COUNT"].values[0]
+        
+        st.subheader(f"Overall {market_type.capitalize()} Market Summary")
+        
+        # Display metrics
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Total Listings", f"{listing_count:,}")
+        with col2:
+            st.metric(f"Average {'Rent' if market_type == 'rental' else 'Sale'} Price", f"${overall_price:,.2f}")
+        with col3:
+            st.metric("Price Range", f"${overall_min:,.2f} - ${overall_max:,.2f}")
+        
+        # Create a gauge chart
+        fig = go.Figure(go.Indicator(
+            mode = "gauge+number",
+            value = overall_price,
+            number = {"prefix": "$", "valueformat": ",.0f"},
+            title = {"text": f"Average {'Rent' if market_type == 'rental' else 'Sale'} Price"},
+            gauge = {
+                "axis": {"range": [overall_min, overall_max]},
+                "bar": {"color": "darkblue"},
+                "steps": [
+                    {"range": [overall_min, overall_min + (overall_max-overall_min)/3], "color": "lightgray"},
+                    {"range": [overall_min + (overall_max-overall_min)/3, overall_min + 2*(overall_max-overall_min)/3], "color": "gray"}
+                ],
+                "threshold": {
+                    "line": {"color": "red", "width": 4},
+                    "thickness": 0.75,
+                    "value": overall_price
+                }
+            }
+        ))
+        
+        st.plotly_chart(fig, use_container_width=True)
+        return
     
     else:
-        # For sales, use the SALE_PRICE_ELASTICITY_AND_DISCOUNT_IMPACT table
-        
-        # Get the most recent snapshot date
-        latest_date = opt_data['SNAPSHOT_DATE'].max()
-        latest_data = opt_data[opt_data['SNAPSHOT_DATE'] == latest_date]
-        
-        # Create a heatmap showing conversion rate by price segment and days segment
-        pivot_data = latest_data.pivot_table(
-            values='CONVERSION_RATE',
-            index='PRICE_SEGMENT',
-            columns='DAYS_SEGMENT',
-            aggfunc='mean'
-        )
-        
-        fig = px.imshow(
-            pivot_data,
-            labels=dict(x="Days on Market Segment", y="Price Segment", color="Conversion Rate"),
-            x=pivot_data.columns,
-            y=pivot_data.index,
-            color_continuous_scale="RdBu_r",
-            title="Sales Conversion Rate by Price and Time on Market"
-        )
-        
+        st.error(f"Unsupported aggregation level: {selected_agg}")
+        st.write("Available columns:", filtered_data.columns.tolist())
+        st.dataframe(filtered_data)
+        return
+    
+    # Sort data for better visualization (by listing count)
+    filtered_data = filtered_data.sort_values("LISTING_COUNT", ascending=False)
+    
+    # Truncate labels if there are too many
+    if len(filtered_data) > 15:
+        st.warning(f"Showing top 15 segments out of {len(filtered_data)} total")
+        filtered_data = filtered_data.head(15)
+    
+    # Create visualization
+    fig = px.bar(
+        filtered_data,
+        x=x_col,
+        y=price_col,
+        text="LISTING_COUNT",
+        title=title,
+        labels={
+            x_col: "Market Segment", 
+            price_col: f"Average {'Rent' if market_type == 'rental' else 'Sale'} Price ($)",
+            "LISTING_COUNT": "Number of Listings"
+        }
+    )
+    
+    # Add error bars
+    fig.update_traces(
+        error_y=dict(
+            type="data",
+            symmetric=False,
+            array=filtered_data[max_price_col] - filtered_data[price_col],
+            arrayminus=filtered_data[price_col] - filtered_data[min_price_col]
+        ),
+        texttemplate="%{text} listings",
+        textposition="outside"
+    )
+    
+    # Rotate x-axis labels if they are combined
+    if selected_agg != "property_type" and selected_agg != "status" and selected_agg != "bedrooms":
         fig.update_layout(
-            xaxis_title='Days on Market Segment',
-            yaxis_title='Price Segment',
-            margin=dict(l=40, r=40, t=60, b=40),
-            height=500
+            xaxis=dict(
+                tickangle=45,
+                title_standoff=25
+            ),
+            margin=dict(b=150)
+        )
+    
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Show data table
+    with st.expander("View Data Details"):
+        st.dataframe(filtered_data)
+
+def visualize_rent_price_optimization(data):
+    """Visualize rental price optimization strategies"""
+    if data is None or data.empty:
+        st.warning("No data available for RENT_PRICE_OPTIMIZATION")
+        return
+    
+    # Create scatter plot
+    fig = px.scatter(
+        data,
+        x="AVG_DAYS_ON_MARKET",
+        y="CONVERSION_RATE",
+        size="PROPERTY_COUNT",
+        color="PRICE_STRATEGY",
+        hover_name="PRICE_QUINTILE",
+        text="PRICE_QUINTILE",
+        title="Rental Price Optimization Strategies",
+        labels={
+            "AVG_DAYS_ON_MARKET": "Average Days on Market",
+            "CONVERSION_RATE": "Conversion Rate",
+            "PROPERTY_COUNT": "Property Count",
+            "PRICE_STRATEGY": "Price Strategy"
+        }
+    )
+    
+    # Update traces
+    fig.update_traces(
+        textposition="top center",
+        marker=dict(sizemode="area", sizeref=0.1)
+    )
+    
+    # Update layout
+    fig.update_layout(
+        xaxis_title="Average Days on Market",
+        yaxis_title="Conversion Rate",
+        yaxis_tickformat=".0%"
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Show optimization insights
+    st.subheader("Price Optimization Insights")
+    
+    # Group by price strategy for insights
+    strategy_data = data.groupby("PRICE_STRATEGY").agg({
+        "PROPERTY_COUNT": "sum",
+        "AVG_DAYS_ON_MARKET": "mean",
+        "CONVERSION_RATE": "mean",
+        "AVG_PRICE_ADJUSTMENT_PCT": "mean"
+    }).reset_index()
+    
+    col1, col2, col3 = st.columns(3)
+    
+    for i, row in strategy_data.iterrows():
+        with col1 if i == 0 else col2 if i == 1 else col3:
+            st.metric(
+                f"{row['PRICE_STRATEGY']} Strategy",
+                f"{row['CONVERSION_RATE']:.1%} Conv. Rate",
+                f"{row['AVG_DAYS_ON_MARKET']:.1f} DOM"
+            )
+
+def visualize_sale_market_timing(data):
+    """Visualize sales market timing and seasonality"""
+    if data is None or data.empty:
+        st.warning("No data available for SALE_MARKET_TIMING_AND_SEASONALITY")
+        return
+    
+    # Create time series visualization
+    fig = go.Figure()
+    
+    # Add market velocity
+    fig.add_trace(go.Scatter(
+        x=data["YEAR_MONTH"],
+        y=data["MARKET_VELOCITY"],
+        name="Market Velocity",
+        line=dict(color="blue", width=3)
+    ))
+    
+    # Add months of inventory
+    fig.add_trace(go.Scatter(
+        x=data["YEAR_MONTH"],
+        y=data["MONTHS_OF_INVENTORY"],
+        name="Months of Inventory",
+        line=dict(color="red", width=2),
+        yaxis="y2"
+    ))
+    
+    # Update layout
+    fig.update_layout(
+        title="Sales Market Timing and Inventory",
+        xaxis_title="Month",
+        yaxis_title="Market Velocity",
+        yaxis2=dict(
+            title="Months of Inventory",
+            overlaying="y",
+            side="right"
+        ),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        )
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Show seasonality by price segment
+    if "PRICE_SEGMENT" in data.columns and "SEASONALITY_INDEX" in data.columns:
+        # Group by price segment
+        segment_data = data.groupby("PRICE_SEGMENT").agg({
+            "SEASONALITY_INDEX": "mean",
+            "DISCOUNT_PRESSURE": "mean",
+            "AVG_DAYS_TO_SELL": "mean"
+        }).reset_index()
+        
+        # Create bar chart
+        fig = px.bar(
+            segment_data,
+            x="PRICE_SEGMENT",
+            y="SEASONALITY_INDEX",
+            color="DISCOUNT_PRESSURE",
+            title="Seasonality by Price Segment",
+            labels={
+                "PRICE_SEGMENT": "Price Segment",
+                "SEASONALITY_INDEX": "Seasonality Index",
+                "DISCOUNT_PRESSURE": "Discount Pressure"
+            }
         )
         
         st.plotly_chart(fig, use_container_width=True)
-        
-        # Create a second chart showing price adjustment impact
-        fig2 = px.scatter(
-            latest_data,
-            x='AVG_PRICE_ADJUSTMENT_PCT',
-            y='CONVERSION_RATE',
-            size='LISTING_COUNT',
-            color='PRICE_SEGMENT',
-            title="Impact of Price Adjustments on Sales Conversion Rate",
-            labels={
-                'AVG_PRICE_ADJUSTMENT_PCT': 'Average Price Adjustment %',
-                'CONVERSION_RATE': 'Conversion Rate',
-                'LISTING_COUNT': 'Number of Listings',
-                'PRICE_SEGMENT': 'Price Segment'
-            },
-            hover_data=['DAYS_SEGMENT', 'AVG_DAYS_TO_SELL', 'MARKET_EFFICIENCY_SCORE']
-        )
-        
-        fig2.update_layout(
-            xaxis_title='Average Price Adjustment %',
-            yaxis_title='Conversion Rate',
-            xaxis_tickformat='.0%',
-            yaxis_tickformat='.0%',
-            margin=dict(l=40, r=40, t=60, b=40),
-            height=500
-        )
-        
-        # Add a vertical line at 0% price adjustment
-        fig2.add_vline(x=0, line_dash="dash", line_color="gray")
-        
-        # Add annotations explaining the quadrants
-        fig2.add_annotation(
-            x=0.05, y=0.8,
-            text="Price increases<br>with high conversion<br>(Strong market)",
-            showarrow=False,
-            font=dict(size=10)
-        )
-        
-        fig2.add_annotation(
-            x=-0.05, y=0.8,
-            text="Price reductions<br>with high conversion<br>(Optimal pricing)",
-            showarrow=False,
-            font=dict(size=10)
-        )
-        
-        fig2.add_annotation(
-            x=0.05, y=0.2,
-            text="Price increases<br>with low conversion<br>(Overpriced)",
-            showarrow=False,
-            font=dict(size=10)
-        )
-        
-        fig2.add_annotation(
-            x=-0.05, y=0.2,
-            text="Price reductions<br>with low conversion<br>(Market resistance)",
-            showarrow=False,
-            font=dict(size=10)
-        )
-        
-        st.plotly_chart(fig2, use_container_width=True)
-        
-        # Key insights
-        st.subheader("Sales Price Optimization Insights")
-        
-        # Calculate optimal price segment and days segment
-        optimal_segment = latest_data.loc[latest_data['MARKET_EFFICIENCY_SCORE'].idxmax()]
-        
-        # Create metrics in a row
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.metric(
-                "Most Efficient Price Segment", 
-                optimal_segment['PRICE_SEGMENT'],
-                f"Efficiency Score: {optimal_segment['MARKET_EFFICIENCY_SCORE']:.2f}"
-            )
-            
-            # Add explanation
-            st.write(f"This price segment has the best balance of conversion rate and time on market.")
-        
-        with col2:
-            st.metric(
-                "Optimal Days on Market Segment", 
-                optimal_segment['DAYS_SEGMENT'],
-                f"Avg Days to Sell: {optimal_segment['AVG_DAYS_TO_SELL']:.1f}"
-            )
-            
-            # Add price adjustment recommendation
-            adjustment = optimal_segment['AVG_PRICE_ADJUSTMENT_PCT']
-            if adjustment < 0:
-                st.write(f"Recommended price adjustment: **{abs(adjustment)*100:.1f}% reduction** for optimal results")
-            else:
-                st.write(f"This segment supports a **{adjustment*100:.1f}% price premium** in the current market")
 
-def display_sales_seasonality(df):
-    """Display sales seasonality analysis"""
-    if df.empty:
-        st.warning("No seasonality data available.")
+def visualize_sale_price_elasticity(data):
+    """Visualize sales price elasticity and discount impact"""
+    if data is None or data.empty:
+        st.warning("No data available for SALE_PRICE_ELASTICITY_AND_DISCOUNT_IMPACT")
         return
     
-    st.subheader("Market Seasonality Analysis")
+    # Create heatmap-like visualization
+    fig = px.scatter(
+        data,
+        x="PRICE_SEGMENT",
+        y="DAYS_SEGMENT",
+        size="LISTING_COUNT",
+        color="CONVERSION_RATE",
+        hover_data=["AVG_PRICE_ADJUSTMENT_PCT", "MARKET_EFFICIENCY_SCORE"],
+        title="Sales Price Elasticity by Time on Market",
+        color_continuous_scale="RdYlGn",
+        labels={
+            "PRICE_SEGMENT": "Price Segment",
+            "DAYS_SEGMENT": "Days on Market Segment",
+            "CONVERSION_RATE": "Conversion Rate",
+            "LISTING_COUNT": "Listing Count"
+        }
+    )
     
-    # First, ensure YEAR_MONTH is datetime - this is critical
-    if 'YEAR_MONTH' in df.columns:
-        try:
-            df['YEAR_MONTH'] = pd.to_datetime(df['YEAR_MONTH'])
-        except Exception as e:
-            st.error(f"Error converting YEAR_MONTH to datetime: {e}")
-            st.write("Column data sample:", df['YEAR_MONTH'].head())
-            return
-    else:
-        st.error("Required column 'YEAR_MONTH' not found in data.")
-        st.write("Available columns:", df.columns.tolist())
+    # Update layout
+    fig.update_layout(
+        xaxis_title="Price Segment",
+        yaxis_title="Days on Market Segment",
+        coloraxis_colorbar=dict(title="Conversion Rate")
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Show efficiency analysis
+    st.subheader("Market Efficiency Analysis")
+    
+    # Group by price segment
+    price_data = data.groupby("PRICE_SEGMENT").agg({
+        "LISTING_COUNT": "sum",
+        "CONVERSION_RATE": "mean",
+        "AVG_DAYS_TO_SELL": "mean",
+        "MARKET_EFFICIENCY_SCORE": "mean"
+    }).reset_index()
+    
+    # Create score chart
+    fig = px.bar(
+        price_data,
+        x="PRICE_SEGMENT",
+        y="MARKET_EFFICIENCY_SCORE",
+        text="MARKET_EFFICIENCY_SCORE",
+        color="AVG_DAYS_TO_SELL",
+        title="Market Efficiency by Price Segment",
+        labels={
+            "PRICE_SEGMENT": "Price Segment",
+            "MARKET_EFFICIENCY_SCORE": "Market Efficiency Score",
+            "AVG_DAYS_TO_SELL": "Avg. Days to Sell"
+        }
+    )
+    
+    fig.update_traces(
+        texttemplate="%{text:.2f}",
+        textposition="outside"
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+
+def visualize_rental_lifecycle(data):
+    """Visualize rental property lifecycle and retention over time"""
+    if data is None or data.empty:
+        st.warning("No data available for RENT_MARKET_HEALTH_INDEX")
         return
     
-    # Get unique price segments
-    if 'PRICE_SEGMENT' in df.columns:
-        segments = sorted(df['PRICE_SEGMENT'].unique().tolist())
+    # Sort data by date in ascending order
+    data = data.sort_values(by="DAY", ascending=True)
+    
+    # Convert DAY column to datetime if it's not already
+    if not pd.api.types.is_datetime64_any_dtype(data["DAY"]):
+        data["DAY"] = pd.to_datetime(data["DAY"])
+    
+    # Convert decimal columns to float to avoid type errors
+    numeric_columns = [
+        "TOTAL_LISTINGS", "NEW_LISTINGS", "RETAINED_LISTINGS", 
+        "CHURNED_LISTINGS", "RESURRECTED_LISTINGS", "INACTIVE_LISTINGS",
+        "NEW_LISTING_RATE", "CHURN_RATE", "RESURRECTION_RATE"
+    ]
+    
+    for col in numeric_columns:
+        if col in data.columns:
+            data[col] = data[col].astype(float)
+    
+    # Create tabs for different lifecycle visualizations
+    tab1, tab2, tab3 = st.tabs(["Listing Flow", "Retention Analysis", "Listing Status Breakdown"])
+    
+    # Tab 1: Listing Flow - Waterfall/Flow visualization
+    with tab1:
+        st.subheader("Rental Listing Flow Over Time")
         
-        # Create segment selection
-        selected_segment = st.selectbox(
-            "Select Price Segment",
-            ["All Segments"] + segments
-        )
+        # Use the most recent date range (last 6 months if available)
+        if len(data) > 180:
+            recent_data = data.tail(180)
+        else:
+            recent_data = data
         
-        # Filter by segment
-        if selected_segment != "All Segments":
-            segment_data = df[df['PRICE_SEGMENT'] == selected_segment].copy()
-        else:
-            # We need to avoid using dt.to_period directly on the entire column
-            # Instead, extract month information directly
-            segment_data = df.copy()
-            segment_data['MONTH'] = segment_data['YEAR_MONTH'].dt.month
-            segment_data['MONTH_NAME'] = segment_data['YEAR_MONTH'].dt.strftime('%b')
-            
-            # Group by month
-            monthly_agg = segment_data.groupby(['MONTH', 'MONTH_NAME']).agg({
-                'ACTIVE_LISTINGS': 'mean',
-                'NEW_LISTINGS': 'mean',
-                'LIKELY_SOLD': 'mean',
-                'AVG_LIST_PRICE': 'mean',
-                'MEDIAN_PRICE': 'mean',
-                'AVG_DOM': 'mean',
-                'AVG_DAYS_TO_SELL': 'mean',
-                'MARKET_VELOCITY': 'mean',
-                'SEASONALITY_INDEX': 'mean'
-            }).reset_index()
-            
-            # This is our aggregated data
-            segment_data = monthly_agg
-    else:
-        # If no price segment, just add month columns
-        segment_data = df.copy()
-        segment_data['MONTH'] = segment_data['YEAR_MONTH'].dt.month
-        segment_data['MONTH_NAME'] = segment_data['YEAR_MONTH'].dt.strftime('%b')
-    
-    # If we don't already have MONTH columns, create them now
-    if 'MONTH' not in segment_data.columns:
-        segment_data['MONTH'] = segment_data['YEAR_MONTH'].dt.month
-        segment_data['MONTH_NAME'] = segment_data['YEAR_MONTH'].dt.strftime('%b')
-    
-    # Group by month if not already grouped
-    if 'MONTH' in segment_data.columns and 'MONTH_NAME' in segment_data.columns:
-        # Check if we need to group (i.e., if there are multiple rows per month)
-        month_counts = segment_data['MONTH'].value_counts()
-        if month_counts.max() > 1:
-            monthly_data = segment_data.groupby(['MONTH', 'MONTH_NAME']).agg({
-                'ACTIVE_LISTINGS': 'mean',
-                'NEW_LISTINGS': 'mean',
-                'LIKELY_SOLD': 'mean',
-                'AVG_DAYS_TO_SELL': 'mean',
-                'SEASONALITY_INDEX': 'mean'
-            }).reset_index()
-        else:
-            # Already grouped, just use segment_data
-            monthly_data = segment_data
-    else:
-        st.error("Unable to process month data.")
-        return
-    
-    # Sort by month
-    monthly_data = monthly_data.sort_values('MONTH')
-    
-    # Create seasonality chart
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        # Create bar chart for seasonality index
+        # Create listing flow chart (area chart)
         fig = go.Figure()
         
-        # Add seasonality index bars
-        if 'SEASONALITY_INDEX' in monthly_data.columns:
-            fig.add_trace(go.Bar(
-                x=monthly_data['MONTH_NAME'],
-                y=monthly_data['SEASONALITY_INDEX'].apply(lambda x: float(x)),
-                marker_color=monthly_data['SEASONALITY_INDEX'].apply(
-                    lambda x: '#4CAF50' if float(x) > 1 else '#F44336'),
-                text=monthly_data['SEASONALITY_INDEX'].apply(lambda x: f"{float(x):.2f}"),
-                textposition='auto',
-                name='Seasonality Index'
-            ))
-            
-            # Add reference line at 1.0 (average seasonality)
-            fig.add_shape(
-                type="line",
-                x0=-0.5,
-                x1=len(monthly_data)-0.5,
-                y0=1.0,
-                y1=1.0,
-                line=dict(color="black", width=1, dash="dash")
-            )
-            
-            # Update layout
-            fig.update_layout(
-                title="Market Seasonality by Month",
-                xaxis_title="Month",
-                yaxis_title="Seasonality Index (1.0 = Average)",
-                height=400,
-                margin=dict(l=40, r=40, t=60, b=40)
-            )
-            
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.warning("Seasonality index data not available.")
-    
-    with col2:
-        # Find best and worst months
-        if 'SEASONALITY_INDEX' in monthly_data.columns:
-            # Fix: Convert to list and get index as integer
-            seasonality_values = monthly_data['SEASONALITY_INDEX'].tolist()
-            if seasonality_values:
-                best_month_idx = seasonality_values.index(max(seasonality_values))
-                worst_month_idx = seasonality_values.index(min(seasonality_values))
-                
-                # Now these are integer indices that can be used with iloc
-                if 0 <= best_month_idx < len(monthly_data) and 0 <= worst_month_idx < len(monthly_data):
-                    best_month = monthly_data.iloc[best_month_idx]
-                    worst_month = monthly_data.iloc[worst_month_idx]
-                    
-                    st.subheader("Best Time to Sell")
-                    st.markdown(f"""
-                    **Best Month:** {best_month['MONTH_NAME']}
-                    
-                    **Seasonality Index:** {float(best_month['SEASONALITY_INDEX']):.2f}
-                    
-                    **Avg Days to Sell:** {float(best_month['AVG_DAYS_TO_SELL']) if 'AVG_DAYS_TO_SELL' in best_month else 'N/A'}
-                    
-                    **Likely Sold:** {float(best_month['LIKELY_SOLD']) if 'LIKELY_SOLD' in best_month else 'N/A'} properties
-                    """)
-                    
-                    st.subheader("Slowest Market Period")
-                    st.markdown(f"""
-                    **Slowest Month:** {worst_month['MONTH_NAME']}
-                    
-                    **Seasonality Index:** {float(worst_month['SEASONALITY_INDEX']):.2f}
-                    
-                    **Avg Days to Sell:** {float(worst_month['AVG_DAYS_TO_SELL']) if 'AVG_DAYS_TO_SELL' in worst_month else 'N/A'}
-                    
-                    **Likely Sold:** {float(worst_month['LIKELY_SOLD']) if 'LIKELY_SOLD' in worst_month else 'N/A'} properties
-                    """)
-                else:
-                    st.warning("Unable to determine best/worst months from the data.")
-            else:
-                st.warning("No seasonality data available to determine best/worst months.")
-        else:
-            st.warning("Seasonality index data not available.")
-    
-    # Additional metrics
-    st.subheader("Monthly Market Metrics")
-    
-    # Check required columns are available before creating visualization
-    required_cols = ['NEW_LISTINGS', 'LIKELY_SOLD', 'AVG_DAYS_TO_SELL', 'ACTIVE_LISTINGS']
-    available_cols = [col for col in required_cols if col in monthly_data.columns]
-    
-    if len(available_cols) > 0:
-        # Create metrics visualizations with available columns
-        num_cols = len(available_cols)
-        subplot_rows = (num_cols + 1) // 2  # Ceiling division for rows
-        subplot_cols = min(2, num_cols)     # Maximum 2 columns
+        # Add traces for different listing statuses
+        fig.add_trace(go.Scatter(
+            x=recent_data["DAY"], 
+            y=recent_data["NEW_LISTINGS"],
+            mode='lines',
+            stackgroup='one',
+            name='New Listings',
+            line=dict(width=0.5, color='rgb(0, 180, 0)'),
+            hovertemplate='%{y:,.0f} new listings<extra></extra>'
+        ))
         
-        titles = []
-        for col in available_cols:
-            if col == 'NEW_LISTINGS':
-                titles.append("New Listings by Month")
-            elif col == 'LIKELY_SOLD':
-                titles.append("Properties Sold by Month")
-            elif col == 'AVG_DAYS_TO_SELL':
-                titles.append("Days to Sell by Month")
-            elif col == 'ACTIVE_LISTINGS':
-                titles.append("Active Listings by Month")
+        fig.add_trace(go.Scatter(
+            x=recent_data["DAY"], 
+            y=recent_data["RETAINED_LISTINGS"],
+            mode='lines',
+            stackgroup='one',
+            name='Retained Listings',
+            line=dict(width=0.5, color='rgb(0, 100, 180)'),
+            hovertemplate='%{y:,.0f} retained listings<extra></extra>'
+        ))
         
-        fig = make_subplots(rows=subplot_rows, cols=subplot_cols, subplot_titles=titles)
-        
-        # Add traces for available columns
-        plot_idx = 0
-        for col in available_cols:
-            row = plot_idx // subplot_cols + 1
-            col_pos = plot_idx % subplot_cols + 1
-            
-            color = '#2196F3'  # Default color
-            if col == 'LIKELY_SOLD':
-                color = '#4CAF50'
-            elif col == 'AVG_DAYS_TO_SELL':
-                color = '#FF9800'
-            elif col == 'ACTIVE_LISTINGS':
-                color = '#9C27B0'
-            
-            fig.add_trace(
-                go.Bar(
-                    x=monthly_data['MONTH_NAME'],
-                    y=monthly_data[col].apply(lambda x: float(x)),
-                    marker_color=color,
-                    name=col.replace('_', ' ').title()
-                ),
-                row=row, col=col_pos
-            )
-            
-            plot_idx += 1
+        fig.add_trace(go.Scatter(
+            x=recent_data["DAY"], 
+            y=recent_data["RESURRECTED_LISTINGS"],
+            mode='lines',
+            stackgroup='one',
+            name='Resurrected Listings',
+            line=dict(width=0.5, color='rgb(180, 180, 0)'),
+            hovertemplate='%{y:,.0f} resurrected listings<extra></extra>'
+        ))
         
         # Update layout
         fig.update_layout(
-            height=300 * subplot_rows,
-            showlegend=False,
-            margin=dict(l=40, r=40, t=80, b=40)
+            title="Rental Listing Flow",
+            xaxis_title="Date",
+            yaxis_title="Number of Listings",
+            hovermode="x unified",
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1
+            )
         )
         
         st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.warning("No metric data available for visualization.")
+        
+        # Calculate and display listing flow metrics
+        st.subheader("Listing Flow Metrics")
+        
+        # Get latest data point
+        latest = recent_data.iloc[-1]
+        
+        # Calculate what percentage each type contributes to total active listings
+        active_total = float(latest["NEW_LISTINGS"] + latest["RETAINED_LISTINGS"] + latest["RESURRECTED_LISTINGS"])
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            new_pct = (float(latest["NEW_LISTINGS"]) / active_total * 100) if active_total > 0 else 0
+            st.metric("New Listings", f"{int(latest['NEW_LISTINGS']):,}", f"{new_pct:.1f}% of active")
+        
+        with col2:
+            retained_pct = (float(latest["RETAINED_LISTINGS"]) / active_total * 100) if active_total > 0 else 0
+            st.metric("Retained Listings", f"{int(latest['RETAINED_LISTINGS']):,}", f"{retained_pct:.1f}% of active")
+        
+        with col3:
+            resurrected_pct = (float(latest["RESURRECTED_LISTINGS"]) / active_total * 100) if active_total > 0 else 0
+            st.metric("Resurrected Listings", f"{int(latest['RESURRECTED_LISTINGS']):,}", f"{resurrected_pct:.1f}% of active")
     
-    # Show raw data
-    with st.expander("View Raw Monthly Data"):
-        st.dataframe(monthly_data)
-
-# ======= MAIN APPLICATION =======
-def main():
-    """Main application function for the Market Analytics dashboard"""
-    st.title("📈 RealtyLens Market Analytics")
-    
-    # Database indicator
-    with st.sidebar:
-        # Show a database indicator if the function is available
-        try:
-            render_db_indicator()
-        except:
-            pass
-    
-    # Listing type selection (tabs for Sales vs. Rentals)
-    tab1, tab2 = st.tabs(["Sales Market", "Rental Market"])
-    
-    with tab1:
-        st.header("Sales Market Analytics")
-        
-        # Initialize loading indicators
-        market_placeholder = st.empty()
-        with market_placeholder:
-            st.info("Loading market health data...")
-        
-        price_placeholder = st.empty()
-        with price_placeholder:
-            st.info("Loading price analysis data...")
-        
-        elasticity_placeholder = st.empty()
-        with elasticity_placeholder:
-            st.info("Loading price elasticity data...")
-        
-        seasonality_placeholder = st.empty()
-        with seasonality_placeholder:
-            st.info("Loading seasonality data...")
-        
-        # Load data for sales market
-        market_data = load_market_health_data(listing_type="sale")
-        price_data = load_price_market_analysis(listing_type="sale")
-        optimization_data = load_price_optimization_data(listing_type="sale")
-        seasonality_data = load_seasonality_data()
-        
-        # Display visualizations
-        with market_placeholder:
-            st.markdown("### Sales Market Health Trends")
-            plot_market_health_trends(market_data, listing_type="sale")
-        
-        with price_placeholder:
-            display_price_analysis(price_data, listing_type="sale")
-        
-        with elasticity_placeholder:
-            display_price_optimization(optimization_data, listing_type="sale")
-        
-        with seasonality_placeholder:
-            display_sales_seasonality(seasonality_data)
-    
+    # Tab 2: Retention Analysis
     with tab2:
-        st.header("Rental Market Analytics")
+        st.subheader("Rental Market Retention Analysis")
         
-        # Initialize loading indicators
-        market_placeholder = st.empty()
-        with market_placeholder:
-            st.info("Loading market health data...")
+        # Calculate retention rate
+        data["RETENTION_RATE"] = data["RETAINED_LISTINGS"] / (data["RETAINED_LISTINGS"] + data["CHURNED_LISTINGS"]) * 100
+        data["RETENTION_RATE"] = data["RETENTION_RATE"].fillna(0)
         
-        price_placeholder = st.empty()
-        with price_placeholder:
-            st.info("Loading price analysis data...")
+        # Create retention visualization
+        fig = go.Figure()
         
-        lifecycle_placeholder = st.empty()
-        with lifecycle_placeholder:
-            st.info("Loading lifecycle data...")
+        # Add retention rate
+        fig.add_trace(go.Scatter(
+            x=data["DAY"],
+            y=data["RETENTION_RATE"],
+            mode="lines",
+            name="Retention Rate (%)",
+            line=dict(color="green", width=3),
+            hovertemplate="Date: %{x|%Y-%m-%d}<br>Retention Rate: %{y:.1f}%<extra></extra>"
+        ))
         
-        optimization_placeholder = st.empty()
-        with optimization_placeholder:
-            st.info("Loading price optimization data...")
+        # Add churn rate on secondary y-axis
+        fig.add_trace(go.Scatter(
+            x=data["DAY"],
+            y=data["CHURN_RATE"] * 100,  # Convert to percentage
+            mode="lines",
+            name="Churn Rate (%)",
+            line=dict(color="red", width=2, dash="dot"),
+            yaxis="y2",
+            hovertemplate="Date: %{x|%Y-%m-%d}<br>Churn Rate: %{y:.1f}%<extra></extra>"
+        ))
         
-        # Load data for rental market
-        market_data = load_market_health_data(listing_type="rent")
-        price_data = load_price_market_analysis(listing_type="rent")
-        lifecycle_data = load_lifecycle_data()
-        optimization_data = load_price_optimization_data(listing_type="rent")
+        # Update layout
+        fig.update_layout(
+            title="Rental Listing Retention vs. Churn Rate",
+            xaxis_title="Date",
+            yaxis_title="Retention Rate (%)",
+            yaxis2=dict(
+                title="Churn Rate (%)",
+                overlaying="y",
+                side="right",
+                range=[0, max(data["CHURN_RATE"] * 100) * 1.1]
+            ),
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1
+            ),
+            hovermode="x unified"
+        )
         
-        # Display visualizations
-        with market_placeholder:
-            st.markdown("### Rental Market Health Trends")
-            plot_market_health_trends(market_data, listing_type="rent")
+        st.plotly_chart(fig, use_container_width=True)
         
-        with price_placeholder:
-            display_price_analysis(price_data, listing_type="rent")
+        # Retention metrics
+        latest = data.iloc[-1]
+        avg_retention = data["RETENTION_RATE"].mean()
         
-        with lifecycle_placeholder:
-            display_rental_lifecycle(lifecycle_data)
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric(
+                "Current Retention Rate", 
+                f"{latest['RETENTION_RATE']:.1f}%",
+                f"{latest['RETENTION_RATE'] - avg_retention:.1f}% vs avg"
+            )
+            
+        with col2:
+            st.metric(
+                "Current Churn Rate", 
+                f"{latest['CHURN_RATE'] * 100:.1f}%",
+                f"{(latest['CHURN_RATE'] - data['CHURN_RATE'].mean()) * 100:.1f}% vs avg"
+            )
+    
+    # Tab 3: Listing Status Breakdown
+    with tab3:
+        st.subheader("Rental Listing Status Breakdown")
         
-        with optimization_placeholder:
-            display_price_optimization(optimization_data, listing_type="rent")
+        # Create pie chart for latest listing status breakdown
+        latest = data.iloc[-1]
+        
+        # Create dataframe for the pie chart
+        status_data = pd.DataFrame({
+            "Status": ["New", "Retained", "Churned", "Resurrected", "Inactive"],
+            "Count": [
+                float(latest["NEW_LISTINGS"]),
+                float(latest["RETAINED_LISTINGS"]),
+                float(latest["CHURNED_LISTINGS"]),
+                float(latest["RESURRECTED_LISTINGS"]),
+                float(latest["INACTIVE_LISTINGS"])
+            ]
+        })
+        
+        # Create pie chart
+        fig = px.pie(
+            status_data, 
+            names="Status", 
+            values="Count",
+            title=f"Listing Status Breakdown ({latest['DAY'].strftime('%Y-%m-%d')})",
+            color="Status",
+            color_discrete_map={
+                "New": "#00B050",
+                "Retained": "#0064B4", 
+                "Churned": "#FF0000",
+                "Resurrected": "#B4B400",
+                "Inactive": "#808080"
+            }
+        )
+        
+        fig.update_traces(
+            textposition='inside', 
+            textinfo='percent+label',
+            hovertemplate="%{label}<br>Count: %{value:,.0f}<br>Percentage: %{percent:.1%}<extra></extra>"
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Show trends over time for each status
+        status_breakdown = data[["DAY", "NEW_LISTINGS", "RETAINED_LISTINGS", 
+                               "CHURNED_LISTINGS", "RESURRECTED_LISTINGS", 
+                               "INACTIVE_LISTINGS"]].copy()
+        
+        # Plot line chart showing trends
+        status_names = {
+            "NEW_LISTINGS": "New",
+            "RETAINED_LISTINGS": "Retained",
+            "CHURNED_LISTINGS": "Churned",
+            "RESURRECTED_LISTINGS": "Resurrected",
+            "INACTIVE_LISTINGS": "Inactive"
+        }
+        
+        fig = go.Figure()
+        
+        for col, name in status_names.items():
+            fig.add_trace(go.Scatter(
+                x=status_breakdown["DAY"],
+                y=status_breakdown[col],
+                mode="lines",
+                name=name
+            ))
+        
+        fig.update_layout(
+            title="Listing Status Trends Over Time",
+            xaxis_title="Date",
+            yaxis_title="Number of Listings",
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1
+            ),
+            hovermode="x unified"
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Add metrics for current period vs previous period
+        if len(data) > 30:  # If we have at least a month of data
+            current = data.iloc[-1]
+            previous = data.iloc[-31]  # Data from ~30 days ago
+            
+            st.subheader("Month-over-Month Changes")
+            
+            cols = st.columns(5)
+            metrics = [
+                ("New Listings", "NEW_LISTINGS"), 
+                ("Retained Listings", "RETAINED_LISTINGS"),
+                ("Churned Listings", "CHURNED_LISTINGS"),
+                ("Resurrected", "RESURRECTED_LISTINGS"),
+                ("Inactive", "INACTIVE_LISTINGS")
+            ]
+            
+            for i, (label, col_name) in enumerate(metrics):
+                with cols[i]:
+                    current_val = float(current[col_name])
+                    prev_val = float(previous[col_name])
+                    change_pct = ((current_val - prev_val) / prev_val * 100) if prev_val > 0 else float('inf')
+                    
+                    # Format the delta to show percentage change
+                    delta = f"{change_pct:+.1f}%" if not pd.isna(change_pct) and not math.isinf(change_pct) else None
+                    
+                    st.metric(label, f"{int(current_val):,}", delta)
 
-# Run the application when the script is executed
+def main():
+    st.title("Market Analytics")
+    
+    # Database indicator in sidebar
+    with st.sidebar:
+        render_db_indicator()
+        
+        st.subheader("Data Tables")
+        table_option = st.radio(
+            "Select Data Table",
+            [
+                "Sales Price Analysis",
+                "Rental Price Analysis",
+                "Rental Lifecycle", 
+                "Rental Market Health",
+                "Rental Price Optimization",
+                "Sales Market Timing",
+                "Sales Price Elasticity"
+            ]
+        )
+    
+    # Load and display data based on selection
+    if table_option == "Sales Price Analysis":
+        data = load_table_data("SALE_PRICE_MARKET_ANALYSIS")
+        st.header("Sales Price Market Analysis")
+        visualize_price_market_analysis(data, market_type="sale")
+        
+    elif table_option == "Rental Price Analysis":
+        data = load_table_data("RENT_PRICE_MARKET_ANALYSIS")
+        st.header("Rental Price Market Analysis")
+        visualize_price_market_analysis(data, market_type="rental")
+        
+    elif table_option == "Rental Lifecycle":
+        data = load_table_data("RENT_LIFECYCLE")
+        st.header("Rental Lifecycle Analysis")
+        visualize_rent_lifecycle(data)
+        
+    elif table_option == "Rental Market Health":
+        data = load_table_data("RENT_MARKET_HEALTH_INDEX")
+        st.header("Rental Property Lifecycle Analysis")
+        visualize_rental_lifecycle(data)
+        
+    elif table_option == "Rental Price Optimization":
+        data = load_table_data("RENT_PRICE_OPTIMIZATION")
+        st.header("Rental Price Optimization")
+        visualize_rent_price_optimization(data)
+        
+    elif table_option == "Sales Market Timing":
+        data = load_table_data("SALE_MARKET_TIMING_AND_SEASONALITY")
+        st.header("Sales Market Timing and Seasonality")
+        visualize_sale_market_timing(data)
+        
+    elif table_option == "Sales Price Elasticity":
+        data = load_table_data("SALE_PRICE_ELASTICITY_AND_DISCOUNT_IMPACT")
+        st.header("Sales Price Elasticity and Discount Impact")
+        visualize_sale_price_elasticity(data)
+    
+    # Show raw data if requested
+    if st.checkbox("Show Raw Data"):
+        if table_option == "Rental Lifecycle":
+            data = load_table_data("RENT_LIFECYCLE")
+        elif table_option == "Rental Market Health":
+            data = load_table_data("RENT_MARKET_HEALTH_INDEX")
+        elif table_option == "Rental Price Analysis":
+            data = load_table_data("RENT_PRICE_MARKET_ANALYSIS")
+        elif table_option == "Rental Price Optimization":
+            data = load_table_data("RENT_PRICE_OPTIMIZATION")
+        elif table_option == "Sales Market Timing":
+            data = load_table_data("SALE_MARKET_TIMING_AND_SEASONALITY")
+        elif table_option == "Sales Price Elasticity":
+            data = load_table_data("SALE_PRICE_ELASTICITY_AND_DISCOUNT_IMPACT")
+        elif table_option == "Sales Price Analysis":
+            data = load_table_data("SALE_PRICE_MARKET_ANALYSIS")
+            
+        st.dataframe(data)
+
 if __name__ == "__main__":
     main()
