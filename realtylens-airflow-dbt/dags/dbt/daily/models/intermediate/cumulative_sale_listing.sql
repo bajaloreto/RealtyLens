@@ -49,7 +49,7 @@ combined AS (
       WHEN p.PROPERTY_STATE in ('Retained', 'Resurrected', 'New') AND t.PROPERTY_ID IS NOT NULL THEN 'Retained'
       WHEN p.PROPERTY_STATE IN ('Retained', 'Resurrected', 'New') AND t.PROPERTY_ID IS NULL THEN 'Churned'
       WHEN t.PROPERTY_ID IS NOT NULL AND p.PROPERTY_STATE in ('Churned', 'Inactive') THEN 'Resurrected'
-      WHEN p.PROPERTY_STATE = 'Churned' AND t.PROPERTY_ID IS NOT NULL THEN 'Inactive'
+      WHEN p.PROPERTY_STATE = 'Churned' AND t.PROPERTY_ID IS NULL THEN 'Inactive'
       ELSE COALESCE(p.PROPERTY_STATE, 'Unknown')
     END as property_state,
     -- Price change tracking

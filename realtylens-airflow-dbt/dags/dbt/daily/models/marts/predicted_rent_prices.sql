@@ -4,8 +4,6 @@
     )
 }}
 
--- This view simply selects all predicted rent prices
--- This allows us to apply more transformations if needed in the future
 
 SELECT 
     LISTING_SK,
