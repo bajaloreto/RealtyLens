@@ -8,8 +8,8 @@ import math
 # Import core functions from main app for Snowflake connection
 from Property_Map import query_snowflake, render_db_indicator
 
-# Page configuration
-st.set_page_config(page_title="RealtyLens Market Analytics", page_icon="📊", layout="wide")
+# Page title and content (without set_page_config)
+st.title("📊 RealtyLens Market Analytics")
 
 def load_table_data(table_name):
     """Load data from a specified table in Snowflake"""
