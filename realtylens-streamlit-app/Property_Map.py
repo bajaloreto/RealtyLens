@@ -1007,6 +1007,21 @@ def apply_filters(data):
             annual_yields = filtered_data['RENT_TO_PRICE_RATIO'] * 12 * 100
             filtered_data = filtered_data[annual_yields >= min_yield_filter]
     
+    # Add to your sidebar where other filters are
+    st.sidebar.subheader("Bedrooms")
+    min_bed = st.sidebar.number_input("Minimum Bedrooms", min_value=0, value=0, step=1)
+
+    st.sidebar.subheader("Bathrooms")
+    min_bath = st.sidebar.number_input("Minimum Bathrooms", min_value=0.0, value=0.0, step=0.5)
+
+    # Add to your filtering logic where you filter other conditions
+    # This will show all properties by default (when min values are 0)
+    # and will handle NaN values by treating them as passing the filter
+    filtered_data = filtered_data[
+        ((filtered_data['BEDROOMS'] >= min_bed) | (min_bed == 0) | filtered_data['BEDROOMS'].isna()) & 
+        ((filtered_data['BATHROOMS'] >= min_bath) | (min_bath == 0) | filtered_data['BATHROOMS'].isna())
+    ]
+    
     # Add a count to show how many properties are being displayed
     st.sidebar.write(f"Showing {len(filtered_data)} of {len(data)} properties")
     
@@ -1436,6 +1451,5 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 
 
