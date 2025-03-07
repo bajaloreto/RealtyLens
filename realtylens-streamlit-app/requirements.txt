@@ -1,0 +1,10 @@
+streamlit==1.42.2
+pandas==2.2.3
+numpy==2.2.3
+plotly==6.0.0
+folium==0.19.5
+streamlit_folium==0.24.0
+matplotlib==3.10.1
+altair==5.5.0
+snowflake-connector-python==3.14.0
+shapely==2.0.7
