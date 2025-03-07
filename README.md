@@ -1,4 +1,7 @@
 # RealtyLens
+
+This is my capstone submission for Zach Wilson's DataExpert Data Engineering bootcamp.
+
 RealtyLens is an application that provide analytic lens for daily rent and sale listings.
 
 Check out the app here https://realtylens.streamlit.app/
