@@ -678,7 +678,7 @@ class Legend(MacroElement):
             {% endmacro %}
             """)
 
-def create_property_map(property_data, listing_type="sale", show_zoning=False):
+def create_property_map(property_data, listing_type="sale"):
     """Create an interactive map with color-coded price tag markers"""
     try:
         if property_data is None or property_data.empty:
@@ -713,81 +713,97 @@ def create_property_map(property_data, listing_type="sale", show_zoning=False):
         marker_cluster.add_to(property_map)
         
         # Process properties in smaller batches for better performance
-        batch_size = 500
+        batch_size = 100
         total_batches = len(valid_data) // batch_size + (1 if len(valid_data) % batch_size > 0 else 0)
         
-        for batch_idx in range(total_batches):
-            start_idx = batch_idx * batch_size
-            end_idx = min(start_idx + batch_size, len(valid_data))
-            batch = valid_data.iloc[start_idx:end_idx]
+        # CSS for popup styling
+        popup_style = """
+        <style>
+            .property-popup {
+                font-family: Arial, sans-serif;
+                font-size: 12px;
+                padding: 5px;
+                min-width: 200px;
+            }
+            .property-popup h3 {
+                margin-top: 0;
+                margin-bottom: 10px;
+                font-size: 14px;
+                font-weight: bold;
+            }
+            .property-popup table {
+                width: 100%;
+                border-collapse: collapse;
+            }
+            .property-popup table td {
+                padding: 3px 0;
+                vertical-align: top;
+            }
+            .property-popup .links {
+                margin-top: 10px;
+                border-top: 1px solid #eee;
+                padding-top: 5px;
+                text-align: center;
+            }
+        </style>
+        """
+        
+        # Add properties to map
+        for i in range(total_batches):
+            batch_start = i * batch_size
+            batch_end = min(batch_start + batch_size, len(valid_data))
             
-            for idx, property_row in batch.iterrows():
+            # Process this batch
+            for idx in range(batch_start, batch_end):
                 try:
-                    # Skip if missing lat/long
-                    if pd.isna(property_row['LATITUDE']) or pd.isna(property_row['LONGITUDE']):
+                    prop = valid_data.iloc[idx]
+                    
+                    # Check if we have lat/long
+                    if pd.isna(prop['LATITUDE']) or pd.isna(prop['LONGITUDE']):
                         continue
                     
-                    # Extract basic property info
-                    price = property_row.get('PRICE', 0)
-                    bedrooms = property_row.get('BEDROOMS', 0)
-                    bathrooms = property_row.get('BATHROOMS', 0)
+                    # Get property details
+                    lat = float(prop['LATITUDE'])
+                    lon = float(prop['LONGITUDE'])
                     
-                    # Determine investment quality and color code
-                    bg_color = '#3498db'  # Default blue
+                    # Skip properties with invalid coordinates
+                    if abs(lat) > 90 or abs(lon) > 180:
+                        continue
                     
-                    if listing_type == "sale" and 'RENT_TO_PRICE_RATIO' in property_row and pd.notna(property_row['RENT_TO_PRICE_RATIO']):
-                        annual_yield = property_row['RENT_TO_PRICE_RATIO'] * 12 * 100
-                        if annual_yield > 8:
-                            bg_color = '#27ae60'  # Green
+                    # Create color based on investment quality for sale properties
+                    color = 'blue'  # Default color
+                    
+                    if listing_type == "sale" and 'RENT_TO_PRICE_RATIO' in prop and pd.notna(prop['RENT_TO_PRICE_RATIO']):
+                        annual_yield = prop['RENT_TO_PRICE_RATIO'] * 12 * 100
+                        
+                        if annual_yield > 10:
+                            color = 'green'  # Excellent investment
+                        elif annual_yield > 8:
+                            color = 'lightgreen'  # Good investment
                         elif annual_yield > 6:
-                            bg_color = '#f39c12'  # Orange
+                            color = 'orange'  # Average investment
                         else:
-                            bg_color = '#e74c3c'  # Red
+                            color = 'red'  # Below average investment
                     
-                    # Format price for shorter display
-                    if price >= 1000000:
-                        price_display = f"${price/1000000:.1f}M"
-                    else:
-                        price_display = f"${price/1000:.0f}K"
+                    # Get common property details
+                    price = prop.get('PRICE', 0)
+                    bedrooms = int(prop.get('BEDROOMS', 0)) if pd.notna(prop.get('BEDROOMS', 0)) else 0
+                    bathrooms = prop.get('BATHROOMS', 0)
                     
-                    # Create simple price tag with inline styles to ensure it works
-                    icon_html = f"""
-                    <div style="
-                        background-color: {bg_color}; 
-                        color: white; 
-                        padding: 3px 8px; 
-                        border-radius: 4px;
-                        font-weight: bold;
-                        text-align: center;
-                        font-size: 12px;
-                        box-shadow: 0 1px 3px rgba(0,0,0,0.4);
-                        min-width: 50px;
-                        font-family: Arial, sans-serif;">
-                        {price_display}
-                    </div>
-                    """
+                    # Create the popup HTML
+                    popup_html = create_property_popup(prop, popup_style, listing_type, idx)
                     
-                    # Use DivIcon for the price tag
-                    icon = folium.DivIcon(
-                        icon_size=(70, 20),
-                        icon_anchor=(35, 10),
-                        html=icon_html
-                    )
-                    
-                    # Add marker with all details in popup
+                    # Add marker to map
                     folium.Marker(
-                        location=[float(property_row['LATITUDE']), float(property_row['LONGITUDE'])],
-                        icon=icon,
-                        popup=folium.Popup(create_property_popup(property_row, "", listing_type, idx), max_width=300),
+                        [lat, lon],
+                        icon=folium.Icon(color=color, icon='home', prefix='fa'),
+                        popup=folium.Popup(popup_html, max_width=300),
                         tooltip=f"${price:,.0f} - {bedrooms} bed, {bathrooms} bath"
                     ).add_to(marker_cluster)
                     
                 except Exception as e:
                     # Skip any problematic markers
                     continue
-        
-        # Note: We're not adding the legend to the map here anymore
-        # It will be displayed in the Streamlit UI instead
         
         return property_map
     
@@ -839,6 +855,15 @@ def create_property_popup(property_row, popup_style, listing_type, idx):
                 </tr>
             """
         
+        # Add zoning group if available
+        if 'ZONING_GROUP' in property_row and pd.notna(property_row['ZONING_GROUP']):
+            popup_html += f"""
+                <tr>
+                    <td><strong>Zoning:</strong></td>
+                    <td>{property_row['ZONING_GROUP']}</td>
+                </tr>
+            """
+        
         # Add year built if available
         if 'YEAR_BUILT' in property_row and pd.notna(property_row['YEAR_BUILT']):
             popup_html += f"""
@@ -868,13 +893,12 @@ def create_property_popup(property_row, popup_style, listing_type, idx):
                     </tr>
                 """
         
-        # Close the table and add links
+        # Close the table and add links with Google search instead of Maps
         encoded_address = urllib.parse.quote(address)
         popup_html += f"""
             </table>
             <div class="links">
-                <a href="?property_id={idx}" target="_self"><strong>View Details</strong></a> | 
-                <a href="https://www.google.com/maps/search/?api=1&query={encoded_address}" target="_blank">Maps</a> | 
+                <a href="https://www.google.com/search?q={encoded_address}" target="_blank">Google</a> | 
                 <a href="https://www.zillow.com/homes/{encoded_address}_rb/" target="_blank">Zillow</a>
             </div>
         </div>
@@ -1312,9 +1336,6 @@ def main():
     else:
         st.session_state.listing_type = "sale"
     
-    # Show zoning overlay option - keep in sidebar for consistency
-    show_zoning = st.sidebar.checkbox("Enable Zoning Overlays", value=False)
-    
     # Show investment heat map legend in sidebar if viewing sales listings
     if st.session_state.listing_type == "sale":
         display_investment_heatmap_legend()
@@ -1365,15 +1386,8 @@ def main():
             # Full-width map for better visibility
             st.subheader("Property Map")
             
-            # Show zoning option only for sales properties if available
-            if show_zoning and st.session_state.listing_type == "sale" and 'ZONING_CODE' in filtered_data.columns:
-                show_zoning_toggle = True
-                st.caption("Zoning overlays are enabled. They will appear on the map as colored areas.")
-            else:
-                show_zoning_toggle = False
-            
-            # Get property map
-            property_map = create_property_map(filtered_data, st.session_state.listing_type, show_zoning_toggle)
+            # Get property map (without show_zoning parameter)
+            property_map = create_property_map(filtered_data, st.session_state.listing_type)
             
             # Display the map with full width
             folium_static(property_map, width=1000, height=600)
@@ -1440,3 +1454,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
