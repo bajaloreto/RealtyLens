@@ -53,8 +53,8 @@ if 'db_hit_timestamp' not in st.session_state:
     st.session_state['db_hit_timestamp'] = None
 
 # ======= PERFORMANCE CONFIGURATION =======
-MAX_VISIBLE_MARKERS = 5000  # Increased from 1000 to 5000
-ENABLE_DATA_SAMPLING = False  # Disabled sampling for full data display
+MAX_VISIBLE_MARKERS = 1000  # Limited to 1000 properties for Streamlit Cloud free tier
+ENABLE_DATA_SAMPLING = True  # Enable sampling to improve performance
 CACHE_EXPIRATION_DAYS = 30   # Longer cache for better performance
 
 # Create cache directory if it doesn't exist
@@ -1358,7 +1358,7 @@ def main():
         display_data = filtered_data
         if len(filtered_data) > MAX_VISIBLE_MARKERS and ENABLE_DATA_SAMPLING:
             display_data = filtered_data.sample(MAX_VISIBLE_MARKERS)
-            st.info(f"Showing a sample of {MAX_VISIBLE_MARKERS} properties for better performance. Filter further to see more specific results.")
+            st.info(f"Showing a sample of {MAX_VISIBLE_MARKERS} properties for better performance on Streamlit Cloud's free tier. Statistics and charts still use all {len(filtered_data)} matching properties.")
             st.write(f"Total matching properties: {len(filtered_data)}")
         else:
             display_data = filtered_data
@@ -1384,7 +1384,7 @@ def main():
             st.subheader("Property Map")
             
             # Get property map (without show_zoning parameter)
-            property_map = create_property_map(filtered_data, st.session_state.listing_type)
+            property_map = create_property_map(display_data, st.session_state.listing_type)
             
             # Display the map with full width
             folium_static(property_map, width=1000, height=600)
@@ -1451,4 +1451,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
