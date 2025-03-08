@@ -7,11 +7,11 @@ RealtyLens is an application that provides analytic lens for daily rent and sale
 **Capabilities**
 - Sales and Rent Market Overview - The Market Dashboard provides averages on a given aggregate levels of bedroom and property type.  
 
-- Market Lifecycle - Realtylens tracks the lifecycle of the rent market. Day to day, it determines whethere a property listing is new, retained, churned, ressurected and inactive. 
+- Market Lifecycle - Realtylens tracks the lifecycle of the rent market. Day to day, it determines whethere a property listing is new, retained, churned, resurrected and inactive. 
 
 - Market Trends - Checks the price and activity trends of properties over time.
 
-- Investment Opportunities - THe project provides an estimate rent price for active sale listings. This gives an investor whether a property is overpriced or underpriced, cash flow positive or negative. It also computes the possible annual yield if the property is bought at the given price and rented out at the estimated rent price.
+- Investment Opportunities - THe project provides an estimated rent price for active sale listings. This gives an investor an insight on whether a property is overpriced or underpriced, cash flow positive or negative. It also computes the possible annual yield if the property is bought at the given price and rented out at the estimated rent price. The rent estimation is powered by a machine learning model.
 
 You can check out the app here - https://realtylens.streamlit.app/
 As of now, the data pipeline and dashboard only includes data for the city of Philadelphia. Please reach out to me if you have any questions or feedback. 
