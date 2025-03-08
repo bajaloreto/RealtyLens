@@ -19,11 +19,11 @@ As of now, the data pipeline and dashboard only includes data for the city of Ph
 ## Data Sources
 **Rentcast API** - https://www.rentcast.io/
 
-- Philadelphia Active Rent and Sale Listings (**JSON**) - https://developers.rentcast.io/reference/property-listings-schema
+- Philadelphia Active Rent and Sale Listings (*JSON*) - https://developers.rentcast.io/reference/property-listings-schema
  
  These are active Listings extracted daily to what is on the market for rent and sale. Capturing the snapshot of the market daily also means day to day some listings are removed and some listings are added. When the listing is removed, it could mean anything but it is also could be likely sold or rented out. It is then possible to see the market trends and lifecycle.
 
-- Philadelphia Property Details (**JSON**) - https://developers.rentcast.io/reference/property-data-schema
+- Philadelphia Property Details (*JSON*) - https://developers.rentcast.io/reference/property-data-schema
 
 The daily active listings from Rentcast API unfortunately does not have details like bathroom and bedroom counts so I had to extract the details separately from another rentcast api endpoint. I ended up extracting almost 700k property records for Philadelphia that serves as a lookup table for the daily active listings to build the property dimension table.
 
