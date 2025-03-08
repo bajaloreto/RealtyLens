@@ -55,7 +55,7 @@ The data pipeline is orchestrated by Astronomer managed Airflow
 
 ![Data Orchestration](./images/airflow_2.png)
 
-*Daily pipeline DAG for Extract Load Transform (ELT) on the active listings*
+*Daily pipeline DAG for Extract Load Transform (ELT) on the active listings, the runs before the last three days captures the development stages of the project*
 
 - Daily DAG - This pipeline runs daily to extract the latest active listings enriched with property details stored in Snowflake, transformed by DBT and served to the streamlit dashboard. The model also runs rent prediction for active sale listings.
 - Weekly DAG - This pipeline runs weekly to extract the latest zoning districts and zip codes stored in Snowflake, transformed by DBT and served to the streamlit dashboard
