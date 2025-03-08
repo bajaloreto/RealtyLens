@@ -7,7 +7,7 @@ RealtyLens is an application that provides analytic lens for daily rent and sale
 **Capabilities**
 - Sales and Rent Market Overview - The Market Dashboard provides averages on a given aggregate levels of bedroom and property type.  
 
-- Market Lifecycle - Realtylens traks the lifecycle of the rent market. Day to day, it determines whethere a property listing is new, retained, churned, ressurected and inactive. 
+- Market Lifecycle - Realtylens tracks the lifecycle of the rent market. Day to day, it determines whethere a property listing is new, retained, churned, ressurected and inactive. 
 
 - Market Trends - Checks the price and activity trends of properties over time.
 
